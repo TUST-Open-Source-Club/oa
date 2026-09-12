@@ -1,36 +1,36 @@
 [submodule "libs"]
 	path = libs
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-libs
+	url = https://github.com/TUST-Open-Source-Club/oa-libs.git
 [submodule "services/auth"]
 	path = services/auth
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-auth
+	url = https://github.com/TUST-Open-Source-Club/oa-auth.git
 [submodule "services/im"]
 	path = services/im
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-im
+	url = https://github.com/TUST-Open-Source-Club/oa-im.git
 [submodule "services/task"]
 	path = services/task
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-task
+	url = https://github.com/TUST-Open-Source-Club/oa-task.git
 [submodule "services/doc"]
 	path = services/doc
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-doc
+	url = https://github.com/TUST-Open-Source-Club/oa-doc.git
 [submodule "services/meeting"]
 	path = services/meeting
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-meeting
+	url = https://github.com/TUST-Open-Source-Club/oa-meeting.git
 [submodule "services/event"]
 	path = services/event
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-event
+	url = https://github.com/TUST-Open-Source-Club/oa-event.git
 [submodule "services/drive"]
 	path = services/drive
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-drive
+	url = https://github.com/TUST-Open-Source-Club/oa-drive.git
 [submodule "services/notify"]
 	path = services/notify
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-notify
+	url = https://github.com/TUST-Open-Source-Club/oa-notify.git
 [submodule "apps/web"]
 	path = apps/web
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-web
+	url = https://github.com/TUST-Open-Source-Club/oa-web.git
 [submodule "apps/app"]
 	path = apps/app
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-app
+	url = https://github.com/TUST-Open-Source-Club/oa-app.git
 [submodule "packages"]
 	path = packages
-	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-fe-libs
+	url = https://github.com/TUST-Open-Source-Club/oa-fe-libs.git

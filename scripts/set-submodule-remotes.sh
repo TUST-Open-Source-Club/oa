@@ -1,37 +1,36 @@
 #!/usr/bin/env bash
-# 将 .gitmodules 中的本地路径来源替换为远程仓库地址。
-# 用法: scripts/set-submodule-remotes.sh git@github.com:your-org
+# 将 .gitmodules 中的本地路径来源统一替换为远程仓库地址。
+# 用法: scripts/set-submodule-remotes.sh https://github.com/your-org
+# 注意：macOS 自带 bash 3.2 不支持关联数组，因此使用 case 映射。
 set -euo pipefail
 
-BASE="${1:?用法: $0 <base-url，例如 git@github.com:your-org>}"
+BASE="${1:?用法: $0 <base-url，例如 https://github.com/your-org>}"
 
-declare -a PATHS=(
-  "libs"
-  "services/auth" "services/im" "services/task" "services/doc"
-  "services/meeting" "services/event" "services/drive" "services/notify"
-  "apps/web" "apps/app"
-  "packages"
-)
+# 子模块路径 → 仓库名
+repo_name() {
+  case "$1" in
+    libs) echo "oa-libs" ;;
+    services/auth) echo "oa-auth" ;;
+    services/im) echo "oa-im" ;;
+    services/task) echo "oa-task" ;;
+    services/doc) echo "oa-doc" ;;
+    services/meeting) echo "oa-meeting" ;;
+    services/event) echo "oa-event" ;;
+    services/drive) echo "oa-drive" ;;
+    services/notify) echo "oa-notify" ;;
+    apps/web) echo "oa-web" ;;
+    apps/app) echo "oa-app" ;;
+    packages) echo "oa-fe-libs" ;;
+    *) return 1 ;;
+  esac
+}
 
-declare -A NAMES=(
-  ["libs"]="club-oa-libs"
-  ["services/auth"]="club-oa-auth"
-  ["services/im"]="club-oa-im"
-  ["services/task"]="club-oa-task"
-  ["services/doc"]="club-oa-doc"
-  ["services/meeting"]="club-oa-meeting"
-  ["services/event"]="club-oa-event"
-  ["services/drive"]="club-oa-drive"
-  ["services/notify"]="club-oa-notify"
-  ["apps/web"]="club-oa-web"
-  ["apps/app"]="club-oa-app"
-  ["packages"]="club-oa-fe-libs"
-)
-
-for path in "${PATHS[@]}"; do
-  name="${NAMES[$path]}"
+for path in libs \
+  services/auth services/im services/task services/doc \
+  services/meeting services/event services/drive services/notify \
+  apps/web apps/app packages; do
   if git config -f .gitmodules "submodule.$path.url" >/dev/null 2>&1; then
-    git config -f .gitmodules "submodule.$path.url" "$BASE/$name.git"
+    git config -f .gitmodules "submodule.$path.url" "$BASE/$(repo_name "$path").git"
   fi
 done
 

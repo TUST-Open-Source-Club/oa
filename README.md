@@ -25,12 +25,10 @@ club-oa/                  # 主仓库：docs + deploy + scripts + 子模块
 ## 克隆与初始化
 
 ```bash
-git clone <主仓库地址> club-oa && cd club-oa
-# 本机开发时子模块来源为本地路径，需要允许 file 协议
-git -c protocol.file.allow=always submodule update --init --recursive
+git clone --recurse-submodules https://github.com/TUST-Open-Source-Club/oa.git club-oa && cd club-oa
 ```
 
-> 远程托管就绪后，执行 `scripts/set-submodule-remotes.sh git@github.com:<org>` 将 `.gitmodules` 切换为远程地址。
+> 子模块均托管在 `TUST-Open-Source-Club` 组织下（`oa-*` 命名）。若修改了 `.gitmodules` 来源，可执行 `scripts/set-submodule-remotes.sh <base-url>` 统一替换。
 
 ## 开发
 
