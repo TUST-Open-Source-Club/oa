@@ -1,0 +1,36 @@
+[submodule "libs"]
+	path = libs
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-libs
+[submodule "services/auth"]
+	path = services/auth
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-auth
+[submodule "services/im"]
+	path = services/im
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-im
+[submodule "services/task"]
+	path = services/task
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-task
+[submodule "services/doc"]
+	path = services/doc
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-doc
+[submodule "services/meeting"]
+	path = services/meeting
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-meeting
+[submodule "services/event"]
+	path = services/event
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-event
+[submodule "services/drive"]
+	path = services/drive
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-drive
+[submodule "services/notify"]
+	path = services/notify
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-notify
+[submodule "apps/web"]
+	path = apps/web
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-web
+[submodule "apps/app"]
+	path = apps/app
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-app
+[submodule "packages"]
+	path = packages
+	url = /Users/sunyu/Projects/club-oa/.repos/club-oa-fe-libs

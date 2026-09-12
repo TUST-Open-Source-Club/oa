@@ -1,0 +1,24 @@
+# 本地组件仓库工作副本（子模块来源）
+.repos/
+
+# 开发产物
+target/
+node_modules/
+dist/
+.output/
+.nuxt/
+coverage/
+data/
+
+# 环境与密钥
+.env
+.env.*
+!.env.example
+*.pem
+*.p8
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log
