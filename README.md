@@ -54,3 +54,7 @@ TDD 开发，行/语句/函数覆盖率 ≥ 80%（分支 ≥ 70%），CI 不达�
 - 需求基线：`docs/requirements.md`
 - 架构设计：`docs/architecture.md`
 - 设计系统：`docs/design-system.md`
+
+## 许可证
+
+本项目采用 **AGPL-3.0-or-later** 许可证，详见 [LICENSE](LICENSE)。
