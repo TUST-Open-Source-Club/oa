@@ -111,6 +111,7 @@ services:
       context: ../apps/web
     environment:
       AUTH_SERVICE_URL: http://auth:8081
+      NOTIFY_SERVICE_URL: http://notify:8088
       NUXT_PUBLIC_APP_NAME: ${APP_NAME:-社团 OA}
       PORT: 3000
     networks: [internal]
