@@ -104,6 +104,70 @@ services:
       timeout: 5s
       retries: 12
 
+  drive:
+    <<: *service-common
+    build:
+      context: ../services/drive
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-club_oa}
+      AUTH_ISSUER: ${PUBLIC_BASE_URL:-http://localhost}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_LOCAL_PATH: /data/storage
+      STORAGE_SECRET: ${STORAGE_SECRET:?required}
+      UPLOAD_TMP_DIR: /data/uploads
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
+      ONLYOFFICE_PUBLIC_URL: ${ONLYOFFICE_PUBLIC_URL:-http://localhost:${ONLYOFFICE_PORT:-8080}}
+      WOPI_BASE_URL: http://drive:8087
+      DEV_MODE: ${DEV_MODE:-false}
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - drive_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8087/healthz || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  doc:
+    <<: *service-common
+    build:
+      context: ../services/doc
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-club_oa}
+      AUTH_ISSUER: ${PUBLIC_BASE_URL:-http://localhost}
+      DEV_MODE: ${DEV_MODE:-false}
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8084/healthz || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  onlyoffice:
+    image: onlyoffice/documentserver:latest
+    restart: unless-stopped
+    environment:
+      JWT_ENABLED: 'true'
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?required}
+      JWT_HEADER: Authorization
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+    ports:
+      - '${ONLYOFFICE_PORT:-8080}:80'
+    networks: [internal]
+
   web:
     image: club-oa/web:${WEB_TAG:-local}
     restart: unless-stopped
@@ -155,4 +219,7 @@ volumes:
   redis_data:
   ntfy_data:
   auth_data:
+  drive_data:
+  onlyoffice_data:
+  onlyoffice_logs:
   gateway_cache:
