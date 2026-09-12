@@ -112,6 +112,8 @@ services:
     environment:
       AUTH_SERVICE_URL: http://auth:8081
       NOTIFY_SERVICE_URL: http://notify:8088
+      DRIVE_SERVICE_URL: http://drive:8087
+      DOC_SERVICE_URL: http://doc:8084
       NUXT_PUBLIC_APP_NAME: ${APP_NAME:-社团 OA}
       PORT: 3000
     networks: [internal]
