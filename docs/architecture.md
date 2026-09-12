@@ -464,3 +464,10 @@ club-oa-auth/
 - 时间、随机数、ID 生成、邮件发送等通过 trait 注入，测试使用 Fake（如 `Mailer::Log`、`Clock::Fixed`），禁止在业务代码中直接调用 `Utc::now()`/`rand`。
 - 外部依赖（S3、OnlyOffice、ntfy、APNs）在测试中用 `wiremock` 级别的替身，禁止真实外呼。
 - flaky 测试零容忍：出现即修复或隔离（标 `#[ignore]` 并开 issue），不允许在 CI 重跑绕过。
+
+### 15.5 代码规范
+
+- **文档注释**：所有函数必须有中文文档注释；极简函数（getter、一行包装）可省略。Rust 公共项由 `#![warn(missing_docs)]` 强制。
+- **行内注释**：解释"为什么"而非"做什么"；安全、边界、兼容性处理必须注释。
+- **命名**：Rust 遵循标准命名；前端组件 PascalCase、composable `useXxx`。
+- 新代码必须通过 `cargo clippy -- -D warnings` 与 ESLint；禁止 `unwrap()`/`expect()` 出现在请求路径上（启动装配与测试除外）。
