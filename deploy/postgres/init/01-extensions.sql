@@ -1,0 +1,4 @@
+-- 初始化扩展（各服务 schema 由服务自身迁移创建）
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS ltree;
