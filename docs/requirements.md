@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | v0.8（需求已确认，待进入设计） |
+| 文档版本 | v0.9（需求调整：推送多通道 + 客户端形态） |
 | 日期 | 2026-09-13 |
 | 状态 | 需求确认阶段，未开始编码 |
 | 范围 | 需求定义 + 总体架构 + 接口约定 + 部署方案 |
@@ -39,6 +39,7 @@
 | v0.6 | 2026-09-13 | 新增质量门禁：测试驱动开发（TDD）与覆盖率 ≥ 80%，CI 强制卡口（19.3） |
 | v0.7 | 2026-09-13 | 仓库拆分：主仓库 + 12 个组件仓库（libs/8 服务/web/app/前端共享），git submodule 挂载；数据库访问层改用 SeaORM + sea-orm-migration |
 | v0.8 | 2026-09-13 | 新增代码规范：函数必须有中文文档注释（极简函数除外），关键逻辑必须行内注释，Rust 公共项开启 missing_docs 检查 |
+| v0.9 | 2026-09-13 | 推送改为多通道：Apple 走 APNs，Android 按厂商走华为/荣耀/魅族/OPPO/vivo/小米推送，逐级兜底 FCM → ntfy；客户端形态调整：iOS 不做原生 App（PWA），Android 改为 PWA 原生壳，桌面端改为 Electron 壳（不再使用 Tauri） |
 
 ---
 
@@ -52,7 +53,7 @@
 
 1. **统一**：统一账号、统一门户、统一 UI 风格、统一通知体系。
 2. **自研可控**：核心功能全部自行实现，不依赖第三方 SaaS；外部仅使用基础设施与开源组件（PostgreSQL、Redis、ntfy、nginx、Stalwart 邮件服务等）。
-3. **多端**：Web 门户 + Android/iOS App + 桌面端（Windows / macOS / Linux），App 统一使用 Tauri v2 单代码库多平台。
+3. **多端**：Web 门户 + iOS PWA + Android 原生壳 App + 桌面端（Windows / macOS / Linux，Electron 壳），前端代码（Vue 3 + Tailwind）三端复用。
 4. **开放**：非注册人员可通过邀请链接参与会议、报名活动、访问分享的网盘文件。
 5. **可部署**：单机 Docker Compose 一键部署；预留横向扩展能力。
 
@@ -91,8 +92,8 @@
 flowchart TB
     subgraph Clients[客户端]
         WEB[Web 门户 Nuxt 3 / PWA]
-        MOB[Android / iOS App Tauri v2]
-        DESK[桌面端 Tauri v2]
+        MOB[Android 壳 App / iOS PWA]
+        DESK[桌面端 Electron]
     end
 
     GW[nginx 网关<br/>TLS / 路由 / 限流]
@@ -129,7 +130,7 @@ flowchart TB
     DRIVE & IM & DOC & EVENT & MEET --> STORE
     MEET --> TURN
     NOTIFY --> NTFY
-    NOTIFY -->|APNs| MOB
+    NOTIFY -->|厂商推送/FCM/APNs/ntfy| MOB
     NOTIFY -->|SMTP| MAIL
     AUTH -->|开通/停用邮箱| MAIL
 ```
@@ -147,7 +148,7 @@ flowchart TB
 | meeting | 自研后端 | Rust + str0m/webrtc-rs + GStreamer | 信令、房间、SFU、录制 | 8085 |
 | event | 自研后端 | Rust + axum | 活动、表单、报名、导出 | 8086 |
 | drive | 自研后端 | Rust + axum | 网盘、预签名、分片、分享 | 8087 |
-| notify | 自研后端 | Rust + axum | 通知聚合、偏好、ntfy 桥接、APNs 推送 | 8088 |
+| notify | 自研后端 | Rust + axum | 通知聚合、偏好、多厂商推送/FCM/APNs/ntfy 桥接 | 8088 |
 | ntfy | 第三方 | ntfy | 推送订阅与分发 | 8090 |
 | coturn | 基础设施 | coturn | STUN/TURN 媒体中继 | 3478/5349 |
 | mail | 第三方 | Stalwart（Rust） | 域名邮箱：SMTP/IMAP/JMAP、反垃圾 | 25/465/587/993 |
@@ -179,7 +180,7 @@ flowchart TB
 | Web 前端 | Nuxt 3（Vue 3 + TS）+ Tailwind CSS + Pinia + TanStack Query | 统一门户 |
 | 文档编辑器 | Milkdown（ProseMirror）+ KaTeX + 自定义插件 | 所见即所得 Markdown/LaTeX，内嵌图片与视频 |
 | Office 预览 | OnlyOffice Document Server + WOPI | 网盘内 Office 文件在线预览；编辑 P2 可开，可整体禁用 |
-| 客户端 App | Tauri v2 + Vite + Vue 3 + Tailwind | Windows/macOS/Linux/Android/iOS，复用组件与 SDK |
+| 客户端形态 | iOS PWA + Android 原生壳（WebView） + Electron 壳 | 共用 packages/ui、packages/core；推送见 13.6 |
 | API 文档 | utoipa 生成 OpenAPI 3 | 前端 SDK 由 openapi-typescript 生成 |
 | 可观测性 | tracing + OpenTelemetry（可选接入 Loki/Grafana） | 结构化日志到 stdout |
 | 测试 | Rust: cargo test + testcontainers；前端: Vitest；E2E: Playwright | CI 全量执行 |
@@ -209,7 +210,9 @@ club-oa/                      # 主仓库：docs + deploy + scripts + 子模块
 │   └── notify/               # club-oa-notify（:8088，schema notify）
 ├── apps/
 │   ├── web/                  # 子模块 club-oa-web（Nuxt 3 门户 + BFF）
-│   └── app/                  # 子模块 club-oa-app（Tauri v2 客户端，五平台）
+│   ├── pwa/                  # iOS PWA（与 web 共享代码）
+│   ├── android-shell/        # Android 原生壳（WebView + 厂商推送）
+│   └── electron/             # 桌面端 Electron 壳
 ├── packages/                 # 子模块 club-oa-fe-libs（ui / core / config）
 ├── deploy/                   # docker-compose / nginx / mail / postgres 初始化
 ├── scripts/                  # 子模块远程地址切换等脚本
@@ -230,8 +233,8 @@ club-oa/                      # 主仓库：docs + deploy + scripts + 子模块
 | D3 | 数据库 | 单实例 PostgreSQL，按服务分 schema | 部署简单；后续可平滑拆库 |
 | D4 | 服务间通信 | 同步 HTTP（内网 + 服务令牌）+ 异步 Redis Streams | 避免引入 MQ 中间件 |
 | D5 | 令牌传递 | Web 走 BFF + httpOnly Cookie；客户端直连 + 系统安全存储 | 安全与跨端兼顾 |
-| D6 | 客户端框架 | Tauri v2（Windows/macOS/Linux/Android/iOS） | 用户指定；单代码库多平台，复用 Vue 组件与 Rust 能力 |
-| D7 | 推送 | ntfy 为统一通知总线；桌面端常驻订阅；iOS 后台推送经 notify 直连 APNs；Android 不依赖 FCM（前台服务/ntfy App） | 已确认仅支持 APNs |
+| D6 | 客户端形态 | iOS PWA（无原生 App）；Android 原生壳；桌面 Electron 壳 | 用户指定；前端代码复用，iOS 免上架 |
+| D7 | 推送 | 多通道按设备厂商选择：Apple→APNs；Android 厂商→厂商推送；兜底 FCM→ntfy | Apple 走 APNs 不变；兜底链已确认 |
 | D8 | 存储后端 | `crates/storage` 抽象：S3（连接已有服务）与本地磁盘双实现，配置切换 | 不使用已停更的 MinIO；无 S3 时可零依赖运行 |
 | D9 | 邮件服务 | 自建 Stalwart + Roundcube，成员域名邮箱 | 开源、轻量、支持 API 自动开通与 OIDC SSO |
 | D10 | 网关 | nginx（替代 Caddy） | 部署环境既有运维习惯 |
@@ -461,11 +464,13 @@ POST /api/v1/auth/guest/exchange
 | 站内通知 | 全部 | 通知中心列表、未读角标、详情跳转 |
 | ntfy 实时推送 | Web / PWA / 桌面端 | 浏览器 Service Worker 或 SSE 订阅；桌面通知 |
 | ntfy 即时推送 | Android/iOS 前台 | App 内订阅 SSE/WebSocket |
-| APNs | iOS 后台 | notify 服务直连 APNs（HTTP/2 + JWT）；需 Apple 开发者账号与 APNs 密钥；**不集成 FCM** |
-| Android 常驻通知 | Android 后台 | 不依赖 FCM：App 内前台服务维持 ntfy WebSocket 并转本地通知（P1）；或安装官方 ntfy App（零开发） |
+| APNs / Web Push | iOS（PWA） | iOS 16.4+ Web Push（ntfy VAPID，系统层经 APNs 投递）；保留 notify 直连 APNs 能力（HTTP/2 + JWT） |
+| 厂商推送 | Android | 华为/荣耀/魅族/OPPO/vivo/小米各自推送服务；设备注册 vendor + token |
+| FCM | Android 兜底 | 厂商通道不可用/未覆盖机型时使用；中国大陆网络通常不可用（见 Q19） |
+| ntfy | 全部兜底 | 桌面 Electron 常驻、Android 前台服务或官方 ntfy App、Web/PWA SSE |
 | 邮件 | 全部 | 经自建 mail 服务发信：账号激活、密码重置、活动通知等；**不提供短信通道** |
 
-- 已确认：仅支持 APNs；Android 后台推送方案详见 13.6。
+- 投递优先级（在 13.6 展开）：设备厂商通道 → FCM → ntfy；任何通道失败均保留站内通知。
 
 ### 5.2 ntfy 集成设计
 
@@ -484,8 +489,9 @@ POST /api/v1/auth/guest/exchange
 | NOTIFY-002 | 在线判断：查询 Redis 在线状态，在线用户仅站内、离线用户发 ntfy | P0 |
 | NOTIFY-003 | 用户偏好：模块级开关、免打扰时段、桌面通知开关 | P1 |
 | NOTIFY-004 | 推送历史：查询、已读、全部已读、清理 | P0 |
-| NOTIFY-005 | iOS 设备注册：上报 APNs device token、失效清理 | P1 |
-| NOTIFY-006 | APNs 推送发送（HTTP/2 + JWT 鉴权），Payload 仅含摘要与深链 | P1 |
+| NOTIFY-005 | 设备注册：多厂商 token（vendor + token，含 FCM token）上报与失效清理 | P1 |
+| NOTIFY-006 | 多通道推送：按设备厂商选择通道，失败自动降级（厂商 → FCM → ntfy），结果可观测 | P1 |
+| NOTIFY-010 | iOS Web Push（ntfy VAPID）：配置下发、订阅管理与授权引导 | P1 |
 | NOTIFY-007 | 邮件发送（经自建 mail 服务 SMTP，模板管理） | P0 |
 | NOTIFY-008 | ntfy 主题/用户/ACL 自动管理 | P0 |
 | NOTIFY-009 | 通知聚合：同类通知折叠（如"3 条新消息"） | P2 |
@@ -516,8 +522,9 @@ POST /api/v1/auth/guest/exchange
 
 - Web：注册 Service Worker；用户登录后通过 SSE `GET /ntfy/u_{uid}/sse` 订阅；收到后发 Notification 并刷新站内角标；点击聚焦对应页面。
 - iOS Web Push：iOS 16.4+ 且"添加到主屏幕"后可用；ntfy 支持 Web Push（VAPID），需 HTTPS。
-- 桌面端（Tauri）：Rust 侧可常驻 ntfy WS 订阅，弹系统通知，支持点击深链。
-- 移动端：前台 SSE/WS；iOS 后台走 APNs（见 5.1/13.6）；Android 后台走应用内常驻通知服务或官方 ntfy App。
+- 桌面端（Electron）：常驻 ntfy WS 订阅，系统通知 + 托盘角标，点击深链。
+- Android：前台 SSE/WS；后台优先厂商推送（华为/荣耀/魅族/OPPO/vivo/小米），再 FCM，再 ntfy 前台服务。
+- iOS（PWA）：前台 SSE/WS；后台 Web Push（ntfy VAPID，经 APNs 投递）。
 - 权限申请时机：用户首次开启通知时请求，不强制。
 
 ### 5.6 隐私
@@ -707,8 +714,8 @@ flowchart LR
 - ICE：STUN 使用 coturn；TURN 凭据由 meeting 服务用 `--use-auth-secret` HMAC 临时生成（用户名=过期时间戳），不落库。
 - 媒体参数：音频 Opus 48kHz；视频 H.264（兼容性优先），最高 1080p30，多档 simulcast（180p/360p/720p，1080p 可选）；屏幕共享独立轨道（高分辨率、低帧率）。
 - 加密：信令与 API 走 HTTPS，媒体走 DTLS-SRTP；不做端到端加密（已确认）。
-- 移动端 WebRTC：iOS 使用 WKWebView（iOS 15+，getUserMedia 可用；不支持 getDisplayMedia，即无法共享屏幕）；Android WebView 支持摄像头/麦克风。WebRTC 移动端兼容性列入联调重点。
-- 桌面端 WebView：Windows（WebView2）支持摄像头/麦克风/屏幕共享；macOS（WKWebView）与 Linux（WebKitGTK）不支持屏幕共享，会议走系统浏览器兜底（详见 13.5）。
+- 移动端 WebRTC：iOS PWA 使用 WebKit（getUserMedia 可用；无 getDisplayMedia，不能共享屏幕但可观看）；Android 壳的 WebView 支持摄像头/麦克风，屏幕共享不做（P2 评估）。
+- 桌面端（Electron 内嵌 Chromium）：摄像头/麦克风/屏幕共享在 Windows/macOS/Linux 均可用，会议体验三端一致（详见 13.5）。
 
 规模设计（已确认单场最多 200 人）：
 
@@ -1118,115 +1125,96 @@ sequenceDiagram
 
 ---
 
-## 13. 客户端 App（Tauri v2：Windows / macOS / Linux / Android / iOS）
+## 13. 客户端形态（iOS PWA / Android 壳 / Electron）
 
-### 13.1 技术架构
+### 13.1 总体策略（已确认）
 
-- 单个 Tauri v2 工程（`apps/app`）编译全部五个平台；UI 按窗口宽度与平台自适应（桌面侧边栏 / 移动底部 Tab）。
-- 与 Web 门户共享 `packages/ui`（组件/样式）与 `packages/core`（API SDK、store、WS、通知抽象）；平台差异通过适配层（storage、notifier、filePicker、share、updater）隔离。
-
-| 层 | 选型 | 说明 |
+| 平台 | 形态 | 说明 |
 | --- | --- | --- |
-| 壳 | Tauri v2 | 桌面：Windows 10+（WebView2）/ macOS 12+（WKWebView）/ Linux（WebKitGTK 4.1+）；移动：Android 8.0+ / iOS 15+ |
-| 前端 | Vite + Vue 3 + TS + Tailwind + Pinia + Vue Router | 复用 `packages/ui`、`packages/core` |
-| 原生能力 | Tauri 插件 | notification、deep-link、store/stronghold、fs、opener、barcode-scanner、http、tray、updater（桌面） |
-| 鉴权 | 直连网关 + Bearer；Refresh Token 存系统安全存储 | 不做 BFF |
-| 数据缓存 | SQLite（tauri-plugin-sql） | 消息、会话、活动、任务列表增量缓存，离线可读 |
-| 实时 | 前台 WebSocket；桌面端可常驻连接（无后台限制） | IM、ntfy 订阅 |
-| 更新 | 桌面：Tauri Updater（自建更新清单）；Android：应用内检查 + 下载页；iOS：TestFlight/App Store | Tauri updater 不支持移动端 |
+| iOS | **PWA（无原生 App）** | Safari 打开 → 添加到主屏幕；推送走 Web Push（ntfy VAPID，系统层经 APNs 投递） |
+| Android | **PWA 原生壳 App** | WebView 加载 PWA 资源 + 原生桥；后台推送接厂商通道 |
+| 桌面（Windows/macOS/Linux） | **Electron 壳** | 内嵌 Chromium，会议/屏幕共享全平台一致；electron-updater 自动更新 |
 
-> 已确认：共享核心 + 单一 Tauri 工程。
+- 不再使用 Tauri（原方案作废）。
+- 前端代码复用：`packages/ui`（组件/样式）、`packages/core`（SDK/store/WS/通知抽象）为 Web/PWA、Android 壳、Electron 共用；平台差异由适配层（storage、notifier、filePicker、share、updater）隔离。
 
-### 13.2 桌面端功能范围（Windows / macOS / Linux）
+### 13.2 桌面端（Electron：Windows / macOS / Linux）
 
 | 编号 | 需求 | 优先级 |
 | --- | --- | --- |
-| DESK-001 | 登录/令牌安全存储（Windows 凭据管理器、macOS Keychain、Linux Secret Service） | P0 |
+| DESK-001 | 登录/令牌安全存储（系统钥匙串/凭据库，经 Electron safeStorage） | P0 |
 | DESK-002 | IM 完整功能（同 Web：收发、搜索、引用、已读、群管理、文件拖拽上传） | P0 |
-| DESK-003 | 系统托盘：未读角标（Windows/macOS 原生）、新消息提示、快捷操作（打开会话/免打扰/退出） | P0 |
+| DESK-003 | 系统托盘：未读角标、新消息提示、快捷操作（打开会话/免打扰/退出） | P0 |
 | DESK-004 | 原生系统通知（点击深链到会话），支持免打扰与通知偏好 | P0 |
 | DESK-005 | 常驻后台运行 + 开机自启（可关闭）；单实例运行 | P1 |
 | DESK-006 | 深链协议 `cluboa://`：通知跳转、会议链接、分享链接唤起 | P0 |
 | DESK-007 | 文件能力：拖拽上传、双击用系统应用打开、另存为、下载目录选择 | P0 |
 | DESK-008 | 全局快捷键：唤起主窗口 / 快速回复（可配置） | P1 |
-| DESK-009 | 会议：Windows 内嵌参会（WebView2 功能完整，含屏幕共享）；macOS/Linux 一键跳系统浏览器参会（WebView 能力限制，见 13.5） | P0 |
-| DESK-010 | 自动更新（Tauri Updater）：更新提示、静默下载、可选回滚 | P1 |
-| DESK-011 | 文档阅读 + 基础编辑；任务/活动/网盘/通知中心全量功能 | P0 |
+| DESK-009 | 会议：内嵌参会（Chromium），屏幕共享、白板、录制观看在三个桌面系统均可用 | P0 |
+| DESK-010 | 自动更新（electron-updater）：更新提示、静默下载、回滚到上一版本 | P1 |
+| DESK-011 | 文档阅读 + 编辑；任务/活动/网盘/通知中心全量功能 | P0 |
 | DESK-012 | 多窗口：独立聊天窗口、独立文档窗口 | P2 |
-| DESK-013 | 截图/粘贴板图片直接发送；macOS 系统分享扩展 | P2 |
+| DESK-013 | 截图/粘贴板图片直接发送 | P2 |
 
-- 布局：左侧模块导航 + 内容区，与 Web 保持一致；窗口最小尺寸 960×640。
-- 离线模式：已缓存消息/文档可读，发送操作排队，网络恢复后自动重发。
+### 13.3 Android（PWA 原生壳）
 
-### 13.3 移动端页面范围
+| 编号 | 需求 | 优先级 |
+| --- | --- | --- |
+| AND-001 | 壳：原生 WebView 容器加载 PWA（打包离线资源 + 增量更新），提供基础原生桥 | P0 |
+| AND-002 | 原生能力：文件选择、拍照/相册、扫码（签到）、系统分享 | P0 |
+| AND-003 | 通知：厂商推送 SDK 集成（华为/荣耀/魅族/OPPO/vivo/小米）与 FCM | P0 |
+| AND-004 | 兜底：前台服务维持 ntfy WebSocket 并转本地通知（P1，引导电池优化白名单） | P1 |
+| AND-005 | 安全存储：Refresh Token 存 Android Keystore | P0 |
+| AND-006 | 深链：会议邀请、活动报名、分享链接唤起 App | P0 |
+| AND-007 | 离线：本地缓存（IndexedDB/SQLite）可读，恢复后增量同步 | P1 |
+| AND-008 | 会议：WebView 内嵌参会（音视频可用；屏幕共享不做，P2 评估） | P0 |
+| AND-009 | 应用内检查更新（下载安装包） | P1 |
 
-| Tab | 功能 |
-| --- | --- |
-| 工作台 | 未读消息、今日任务、即将开始会议/活动、通知入口 |
-| 消息 | 会话列表、聊天（文字/图片/视频/文件/引用/已读）、拍照/相册/文件发送、@提及 |
-| 任务 | 我的任务、项目看板（简化拖拽/状态切换）、任务详情与评论 |
-| 会议/活动 | 会议列表与加入、活动列表与报名、我的报名、扫码签到 |
-| 网盘 | 空间浏览、上传（拍照/相册/文件）、预览、下载、分享 |
-| 我的 | 资料、通知偏好、设备、主题、关于 |
+【待确认 Q17】Android 壳技术选型：原生 Kotlin WebView 壳（推荐，厂商推送 SDK 直连、包体最小）还是 Capacitor/其他混合框架？
 
-- 登录、账号激活、忘记密码；OIDC PKCE（系统浏览器 + deep-link 回跳）作为可选登录方式。
-- 游客模式：未登录可打开会议邀请 `/m/{code}`、活动报名 `/e/{slug}`、网盘分享 `/s/{token}` 深链。
-- 文档：阅读完整支持；基础编辑 P1；复杂编辑器能力（表格、图片上传）移动端可用但交互简化。
+### 13.4 iOS（PWA，无原生 App）
 
-### 13.4 聊天与实时
+| 编号 | 需求 | 优先级 |
+| --- | --- | --- |
+| IOS-001 | PWA：manifest + Service Worker，可添加到主屏幕，离线壳 | P0 |
+| IOS-002 | 推送：iOS 16.4+ Web Push（ntfy VAPID，系统层经 APNs 投递）；授权引导与订阅管理 | P0 |
+| IOS-003 | 会议：WebKit 内嵌参会（getUserMedia 可用；不能共享屏幕，可观看；后台中断提示） | P0 |
+| IOS-004 | 扫码签到：调用摄像头扫码（Web API，或跳转系统相机识别） | P1 |
+| IOS-005 | 安装指引页（门户 `/download#ios`，图文说明添加到主屏幕） | P0 |
 
-- 桌面端：WebSocket 常驻（窗口最小化/托盘不中断），断网恢复后按 seq 增量补拉。
-- 移动端前台：WebSocket 实时收发；进入后台断开，恢复时用 seq 增量补拉。
-- 后台通知：iOS 接收 APNs 通知、Android 接收常驻通知服务/ntfy App 通知（标题 + 摘要），桌面端接收系统原生通知；点击深链进入对应会话；本地缓存增量同步。
-- 媒体：拍照/相册选图上传（压缩后上传，保留原图选项）；视频选择上传；文件通过系统文件选择器；桌面端支持拖拽/粘贴上传。
-- 已读：进入会话上报位点；通知栏快捷已读（Android，P1）。
+- 限制：无系统级后台常驻；推送必须安装到主屏幕并授权；无屏幕共享；无 App Store 上架需求。
 
-### 13.5 会议（桌面端与移动端）
+### 13.5 会议能力对照（客户端）
 
-WebView 能力差异（重要，决定会议实现策略）：
-
-| 平台 | 麦克风/摄像头 | 屏幕共享 | 建议 |
+| 平台 | 摄像头/麦克风 | 屏幕共享 | 说明 |
 | --- | --- | --- | --- |
-| Windows（WebView2，Chromium） | 支持 | 支持 | 客户端内嵌参会，功能完整 |
-| macOS（WKWebView） | 支持（需权限声明） | 不支持 | 内嵌参会；需要共享/观看屏幕时一键跳系统浏览器 |
-| Linux（WebKitGTK） | 有限支持 | 不支持 | 会议默认跳系统浏览器 |
-| Android（WebView） | 支持 | 不支持（P2 评估） | 客户端内嵌参会 |
-| iOS（WKWebView） | 支持 | 不支持 | 客户端内嵌参会 |
+| Electron（Win/macOS/Linux，Chromium） | 支持 | 支持 | 内嵌参会，三端一致 |
+| Android 壳（WebView，Chromium） | 支持 | 不支持（P2 评估） | 内嵌参会 |
+| iOS PWA（WebKit） | 支持 | 不支持 | 内嵌参会，可观看共享 |
+| Web 浏览器 | 支持 | 支持 | 完整能力 |
 
-- 桌面端：默认内嵌参会；检测到当前平台不支持屏幕共享时，提供"在浏览器中打开会议"按钮（透传登录态，免二次登录）。
-- 移动端：支持加入会议、音频/视频、切换前后摄像头、静音、参会人列表、会中聊天、观看屏幕共享、白板（触控绘制，P1）；不支持发起屏幕共享。
-- 录制：由服务端完成，客户端仅观看/接收通知。
-- 系统权限：麦克风、摄像头、通知、相册；被拒绝时给出引导。
-- 后台/锁屏会中断移动端媒体，App 明确提示不可后台开会；桌面端无此限制。
-- P2：桌面端原生采集屏幕（Rust 调用 Windows Graphics Capture / macOS ScreenCaptureKit）注入 WebRTC，替代浏览器跳转。
+### 13.6 推送（多厂商 + FCM + ntfy 兜底）
 
-### 13.6 推送
+**投递优先级（逐级降级，全部失败保留站内通知）**：
 
-- 桌面端：常驻 ntfy WebSocket/SSE 订阅（前台后台均可），系统原生通知 + 托盘角标；无需 APNs/FCM。
-- 移动端前台：ntfy SSE/WebSocket 订阅（同一用户主题）。
-- 移动端后台（iOS）：notify 服务经 APNs（HTTP/2 + JWT）下发；App 启动时上报 device token，退出登录解绑。
-- 移动端后台（Android）：**不依赖 FCM**。方案 A：应用内前台服务（Foreground Service）常驻 ntfy WebSocket，收到后发本地通知（P1，需引导电池优化白名单）；方案 B：安装官方 ntfy App 订阅同一主题（零开发）。
-- 本地通知与角标：未读总数同步（Android 通知渠道分级；iOS badge；桌面端托盘角标）。
-- Web/PWA：走 ntfy Web Push（VAPID），见 12.4。
+1. **Apple（iOS PWA）**：APNs —— 通过 Web Push（ntfy VAPID）投递；notify 保留直连 APNs 能力（HTTP/2 + JWT）备用。
+2. **Android 厂商通道**：按设备厂商（华为/荣耀/魅族/OPPO/vivo/小米）调用对应推送服务。
+3. **FCM**：厂商通道不可用或未覆盖机型时使用；**中国大陆网络通常不可用**（主要面向海外/特殊机型，见 Q19）。
+4. **ntfy**：最终兜底 —— 桌面 Electron 常驻订阅、Android 前台服务维持订阅、Web/PWA SSE、官方 ntfy App。
 
-> 已确认：将申请 Apple 开发者账号（99 美元/年），用于 APNs 推送与 App Store 上架。
+- 设备注册：同一设备可同时上报多个 token（厂商 token + FCM token），记录 `vendor`；notify 按 vendor 选路，发送失败记录并降级。
+- 凭据：各厂商开发者账号与 AppKey/AppSecret、FCM 服务账号、ntfy Token、APNs 密钥（备用）统一在 notify 服务配置（见 18.2）。
+- 隐私：推送仅含标题、摘要与深链，不含正文。
 
 ### 13.7 构建与发布
 
-| 项 | 方案 |
-| --- | --- |
-| 构建 | CI：GitHub Actions；桌面三平台与 Android 在 ubuntu/macos runner 构建，iOS 在 macOS runner 构建 |
-| 桌面产物 | Windows：NSIS/MSI（x64）；macOS：DMG（Universal 或 arm64+x64）；Linux：AppImage + deb（x64） |
-| 桌面更新 | Tauri Updater：由 nginx 静态目录或对象存储托管 `latest.json` 与安装包，应用内提示/静默更新，保留上一版本回滚 |
-| 移动分发 | iOS 上架 App Store（TestFlight 内测）；Android 以官网 APK 直发为主、不上架国内应用商店，Google Play 可选 |
-| 签名 | Android keystore、iOS 证书/描述文件、Windows 代码签名、macOS Developer ID + 公证，统一存 CI Secrets |
-| 版本 | 语义化版本 + 构建号；应用内"检查更新"（桌面自动更新；Android 商店更新或应用内检查；iOS 商店更新） |
-| 发布页 | 官网/门户 `/download`：桌面安装包、Android APK、应用商店链接与安装说明 |
-| 体积 | 目标安装包：桌面 < 15MB、Android APK < 25MB |
+| 平台 | 产物与分发 | 更新方式 |
+| --- | --- | --- |
+| Android | AAB/APK；应用商店（Google Play 可选，国内厂商商店按需）+ 官网 APK 兜底 | 应用内检查更新 / 商店更新 |
+| 桌面 Electron | Windows NSIS/MSI、macOS DMG、Linux AppImage+deb | electron-updater（nginx/S3 托管更新清单） |
+| iOS | 无安装包；门户安装指引（添加到主屏幕） | 刷新即更新（Service Worker） |
 
-> 已确认：Apple 开发者账号将申请（APNs + App Store）；Android 不上架国内应用商店（Google Play 可选）；桌面端 macOS 签名公证（复用 Apple 账号）、Windows 首版不签名并在下载页提供图文指引。
-
----
+- 签名：Android keystore；macOS Developer ID + 公证；Windows 代码签名可选（见 20.4 Q21）。
 
 ## 14. 数据与存储
 
@@ -1342,7 +1330,7 @@ WebView 能力差异（重要，决定会议实现策略）：
 | 性能 | 常规 API P95 < 200ms（同城网络，不含上传下载）；WS 消息端到端 < 500ms |
 | 容量 | 设计规模：1000 成员账号、100 并发在线、单群 500 人、域名邮箱 500 个；会议为条件模块：目标单场最多 200 人（大会议模式，常规 ≤ 50 人），资源评估不通过时降级或不做（见 C17） |
 | 可用性 | 单机部署目标 99.5%；服务崩溃自动重启（restart: unless-stopped）；健康检查 |
-| 兼容性 | 浏览器：Chrome/Edge 最新两个大版本、Safari 16+、Firefox 最新；移动：Android 8+、iOS 15+；桌面：Windows 10+、macOS 12+、Ubuntu 22.04+（AppImage/deb） |
+| 兼容性 | 浏览器：Chrome/Edge 最新两个大版本、Safari 16+、Firefox 最新；Android 8+（壳内 WebView 需较新 Chromium）；iOS 16.4+（PWA 推送）；桌面 Electron 支持 Windows 10+、macOS 12+、Ubuntu 22.04+ |
 | 可观测 | 结构化 JSON 日志（traceId 贯穿）；/healthz /readyz；可选 Prometheus 指标 |
 | 可维护 | 统一错误码表；OpenAPI 文档；迁移脚本；一键 compose 部署文档 |
 | 可扩展 | 服务无状态（除 WS/SFU 会话，可后续引入 Redis 广播与 SFU 级联横向扩展）；存储/PG/Redis 可替换为托管服务 |
@@ -1412,11 +1400,29 @@ MAIL_NOREPLY_ADDRESS=noreply@club.example.com
 MAIL_ADMIN_API_URL=http://mail:8080
 MAIL_ADMIN_API_TOKEN=...
 
-# iOS 推送（仅 APNs，无 FCM）
+# 推送：iOS PWA Web Push（ntfy VAPID）+ APNs 直连备用
+NTFY_VAPID_PUBLIC=...
+NTFY_VAPID_PRIVATE=...
 APNS_KEY_PATH=/run/secrets/apns.p8
 APNS_KEY_ID=...
 APNS_TEAM_ID=...
 APNS_TOPIC=com.club.oa
+
+# Android 厂商推送（按需配置，未配置的厂商自动降级）
+HUAWEI_PUSH_APP_ID=...
+HUAWEI_PUSH_APP_SECRET=...
+HONOR_PUSH_APP_ID=...
+HONOR_PUSH_APP_SECRET=...
+XIAOMI_PUSH_APP_SECRET=...
+OPPO_PUSH_APP_KEY=...
+OPPO_PUSH_APP_SECRET=...
+VIVO_PUSH_APP_ID=...
+VIVO_PUSH_APP_KEY=...
+VIVO_PUSH_APP_SECRET=...
+MEIZU_PUSH_APP_ID=...
+MEIZU_PUSH_APP_KEY=...
+FCM_PROJECT_ID=...
+FCM_SERVICE_ACCOUNT_JSON=/run/secrets/fcm.json
 
 # OnlyOffice（可选，见 10.6）
 ONLYOFFICE_ENABLED=true
@@ -1453,7 +1459,7 @@ MEETING_MAX_PARTICIPANTS=200
 | --- | --- | --- | --- |
 | M0 | 需求确认、架构评审、UI 定义 | 本文档定稿、架构文档、设计 token、原型图 | 2-3 人日 |
 | M1 | 基础设施（compose、nginx、PG/Redis、存储抽象）+ auth 服务 + 门户骨架 | 可登录、可管理用户 | 7-10 人日 |
-| M2 | UI 组件库 + 门户布局 + 通知中心 + notify（ntfy/APNs 打通） | 统一风格基础、推送可用 | 6-9 人日 |
+| M2 | UI 组件库 + 门户布局 + 通知中心 + notify（ntfy 打通，多厂商推送预留） | 统一风格基础、站内/ntfy 推送可用 | 6-9 人日 |
 | M2b | 域名邮箱：Stalwart + Roundcube 部署、DNS/证书、开通集成 | 域名邮箱可用 | 4-6 人日 |
 | M3 | 网盘 + 文档（含 Markdown 导入/LaTeX/内嵌媒体、OnlyOffice 预览） | 两个模块可用（Web） | 13-18 人日 |
 | M4 | IM（含 WS、媒体、已读、群聊） | 实时聊天可用 | 12-18 人日 |
@@ -1462,8 +1468,10 @@ MEETING_MAX_PARTICIPANTS=200
 | M6b | **会议技术验证（Spike）**：SFU 单实例压测、带宽与资源测算、录制可行性验证 | 技术验证报告 + 是否继续的决策（见 C17/A8） | 4-6 人日 |
 | M7 | 会议 v1：信令 + SFU + simulcast + 屏幕共享 + 游客控制 + 会中聊天（条件执行，M6b 通过后启动；不通过则跳过） | 常规会议（≤ 50 人）可用 | 18-26 人日 |
 | M8 | 白板 + 服务端录制 + 大会议模式（200 人）与级联压测（条件执行，依赖 M7） | 白板/录制/大会议可用 | 14-22 人日 |
-| M9a | 桌面端 App（Tauri）：认证、IM、任务、文档、网盘、通知/托盘、自动更新 | Windows/macOS/Linux 安装包 | 10-14 人日 |
-| M9b | 移动端 App（Tauri）：认证、消息、任务、会议/活动、网盘、推送 | Android/iOS 安装包 | 15-22 人日 |
+| M9a | 桌面端（Electron）：认证、IM、任务、文档、网盘、通知/托盘、自动更新 | Windows/macOS/Linux 安装包 | 10-14 人日 |
+| M9b | Android 壳 App：WebView 壳 + 原生桥 + 厂商推送 + 扫码/文件 | Android APK/AAB | 12-18 人日 |
+| M9c | iOS PWA：安装指引 + Web Push 订阅 + 离线壳 | 可安装 PWA（无安装包） | 4-6 人日 |
+| M9d | 多厂商推送接入：华为/荣耀/魅族/OPPO/vivo/小米 + FCM 兜底 | 各厂商通道联调通过 | 8-12 人日 |
 | M10 | 联调、E2E、性能、部署文档、安全加固 | 上线版本 v1.0 | 8-12 人日 |
 
 > 说明：工作量为粗略估算，会议（条件模块，取决于 M6b 验证结果）与客户端（尤其移动端）是风险最高的两块。建议按 M1-M4 先交付 Web 核心，再评估会议与客户端投入。
@@ -1503,14 +1511,14 @@ MEETING_MAX_PARTICIPANTS=200
 | 编号 | 风险 | 影响 | 缓解 |
 | --- | --- | --- | --- |
 | R1 | 200 人会议：SFU 选路/级联、带宽与录制工程量大 | 会议模块延期或大会议体验差 | 先做技术验证（M6b）；不达标则降级规模或不做（C17）；大会议模式（演讲者视频 + 听众音频） |
-| R2 | 移动端 WebRTC 兼容性（iOS WKWebView） | 移动端会议体验差 | 尽早真机验证；必要时会议页面用系统浏览器打开 |
-| R3 | iOS 推送与上架依赖 Apple 开发者账号与 APNs 配置 | 无法后台推送、无法上架 | 已确认申请（行动项 A1）；备选 ntfy App 与前台通知 |
+| R2 | iOS PWA 限制（无后台常驻、无屏幕共享、推送需安装到主屏幕） | iOS 体验弱于原生 | 产品提示 + 安装引导；接受该限制（已确认不做 iOS 原生 App） |
+| R3 | 各 Android 厂商推送账号/资质申请周期长、审核严格 | 后台推送覆盖不全 | 提前申请（行动项 A9）；FCM/ntfy 兜底可用 |
 | R4 | 自托管 ntfy 的公网可达与安全 | 推送不稳/被滥用 | 网关代理 + ACL + 令牌；仅 notify 可发布 |
 | R5 | 中文全文检索扩展部署复杂 | 搜索体验一般 | 首版 pg_trgm，二版 pg_jieba 自定义镜像 |
 | R6 | 单机资源不足（200 人会议/录制） | 服务不稳定 | 16C32G + 1Gbps 以上带宽；资源隔离；录制并发限制 |
 | R7 | Office 在线预览需求不确定 | 增加转换服务复杂度 | 标记 P2，优先 PDF/图片/音视频预览 |
 | R8 | 邮件送达率依赖 IP 信誉与 DNS 配置 | 验证码/通知进垃圾箱 | 已确认出站走中继；仍配齐 SPF/DKIM/DMARC（入站域名需 PTR） |
-| R9 | 桌面端 WebView 能力差异（macOS/Linux 屏幕共享与 WebRTC 受限） | 各平台会议体验不一致 | Windows 内嵌优先；macOS/Linux 跳系统浏览器兜底；P2 原生采集 |
+| R9 | Electron 包体积与内存占用高于 Tauri | 桌面端资源占用偏高 | 可接受（桌面端体验与一致性优先）；按需裁剪依赖 |
 | R10 | 代码签名/公证缺失导致安装拦截 | 用户安装受阻、客服成本上升 | 购买证书并公证；下载页提供图文安装指引 |
 | R11 | 云服务器封禁入站 25 端口或无法设置 PTR | 域名邮箱收信不可用 | 已确认出站走中继；入站按行动项 A3 确认（收信转发/更换 VPS） |
 
@@ -1519,8 +1527,8 @@ MEETING_MAX_PARTICIPANTS=200
 | 编号 | 决策 | 说明 |
 | --- | --- | --- |
 | C1 | 任务看板自研，不引入 Plane/Django | 见 6.1 |
-| C2 | 客户端使用 Tauri v2 单代码库：桌面（Windows/macOS/Linux）+ 移动（Android/iOS） | 见第 13 章 |
-| C3 | 推送仅支持 APNs，不集成 FCM | Android 走前台服务或官方 ntfy App，见 13.6 |
+| C2 | 客户端形态：iOS PWA、Android 原生壳、桌面 Electron（不再使用 Tauri） | 见第 13 章 |
+| C3 | 推送多通道：Apple→APNs；Android 厂商推送→FCM→ntfy 逐级兜底 | 见 5.1/13.6 |
 | C4 | 会议规模目标单场最多 200 人，支持大会议模式与 SFU 级联（条件模块，见 C17） | 见 8.2 / MEET-013 |
 | C5 | 不做虚拟背景、美颜与 E2EE，仅基础 HTTPS + DTLS-SRTP | 见 8.1 |
 | C6 | 文档支持 Markdown 导入、Markdown + LaTeX、内嵌图片与视频 | 见 7.1 |
@@ -1542,7 +1550,7 @@ MEETING_MAX_PARTICIPANTS=200
 
 | 编号 | 事项 | 说明 |
 | --- | --- | --- |
-| A1 | 申请 Apple 开发者账号（APNs + App Store 上架） | 审核需时间，尽快启动 |
+| A1 | Apple 开发者账号（可选）：仅 APNs 直连备用；PWA Web Push 不需要 | 视 Q19/Q20 结论决定是否申请 |
 | A2 | 确认阿里云 OSS 区域与 S3 兼容端点，或确认改用本地存储 | 接入存储前 |
 | A3 | 确认邮件入站方案：25 端口可用性，或选用收信转发服务 | 部署邮件服务前必须完成 |
 | A4 | 确认服务器配置与带宽（会议场景建议 16C32G + 1Gbps） | 部署前；同时作为 M6b 技术验证的输入 |
@@ -1550,6 +1558,16 @@ MEETING_MAX_PARTICIPANTS=200
 | A6 | 确认邮箱默认配额与邮件组清单（默认 2GB/人、`all@`/`board@`） | 邮箱开通前 |
 | A7 | 设计风格最终确认（默认靛蓝 + 暗色） | M0 出稿后 |
 | A8 | 确认会议技术验证的验收标准（人数、带宽、月度预算） | 进入 M6b 前 |
+
+### 20.4 本轮新增待确认（v0.9 调整）
+
+| 编号 | 问题 | 建议 |
+| --- | --- | --- |
+| Q17 | Android 壳技术选型：原生 Kotlin WebView 壳 vs Capacitor 等混合框架？ | 推荐原生 Kotlin WebView 壳（厂商推送 SDK 直连、包体最小） |
+| Q18 | 厂商推送账号/资质（华为/荣耀/魅族/OPPO/vivo/小米）是否具备？ | 提前申请；缺失的厂商自动降级 FCM/ntfy |
+| Q19 | FCM 在中国大陆不可用（依赖 Google 服务），仅作海外兜底，是否接受？ | 接受；境内以厂商通道 + ntfy 为准 |
+| Q20 | iOS PWA 推送需 iOS 16.4+ 且安装到主屏幕并授权，是否接受？ | 接受；提供安装引导页与站内红点兜底 |
+| Q21 | 桌面 Electron 签名/公证：macOS 签名公证、Windows 是否购买代码签名？ | macOS 签名公证；Windows 首版不签名并给图文指引 |
 
 ---
 
@@ -1567,8 +1585,9 @@ MEETING_MAX_PARTICIPANTS=200
 | 8. 公共网盘（S3/本地存储） | 第 10 章 DRV-001 ~ DRV-014 |
 | 9. 每功能一容器；Rust + Vue3 + Nuxt + Tailwind；统一风格 | 第 2 章（服务清单）、第 12 章（设计系统）、第 18 章（部署） |
 | 10. 先出需求文档（Markdown），确认后开发 | 本文档；确认方式见文末 |
-| 11. Android/iOS App（Tauri） | 第 13 章（13.3 ~ 13.7）；推送见 5.1/13.6；发布见 13.7 |
-| 12. 桌面端 App（Windows/Linux/macOS，Tauri） | 第 13 章（13.1、13.2、13.4 ~ 13.7，DESK-001 ~ DESK-013） |
+| 11. 移动端：iOS PWA + Android 壳 App | 13.1/13.3/13.4/13.5/13.6/13.7（AND-001 ~ AND-009、IOS-001 ~ IOS-005） |
+| 12. 桌面端（Windows/Linux/macOS，Electron） | 13.1/13.2/13.5/13.6/13.7（DESK-001 ~ DESK-013） |
+| 13b. 多厂商推送 + FCM + ntfy 兜底 | 5.1/5.3/13.6（NOTIFY-005/006/010） |
 | 13. 集成开源邮件服务器（社团域名邮箱） | 第 11 章 MAIL-001 ~ MAIL-013 |
 | 14. 对象存储支持阿里云 OSS | 10.2 / 14.3 / C13 |
 | 15. 网盘 Office 在线预览（OnlyOffice + WOPI 标准协议） | 10.6 / DRV-009 / C15 |
