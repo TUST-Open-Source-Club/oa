@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | v0.10（需求已确认：推送多通道 + 客户端新形态） |
+| 文档版本 | v0.11（新增 HarmonyOS NEXT 壳） |
 | 日期 | 2026-09-13 |
 | 状态 | 需求确认阶段，未开始编码 |
 | 范围 | 需求定义 + 总体架构 + 接口约定 + 部署方案 |
@@ -41,6 +41,7 @@
 | v0.8 | 2026-09-13 | 新增代码规范：函数必须有中文文档注释（极简函数除外），关键逻辑必须行内注释，Rust 公共项开启 missing_docs 检查 |
 | v0.9 | 2026-09-13 | 推送改为多通道：Apple 走 APNs，Android 按厂商走华为/荣耀/魅族/OPPO/vivo/小米推送，逐级兜底 FCM → ntfy；客户端形态调整：iOS 不做原生 App（PWA），Android 改为 PWA 原生壳，桌面端改为 Electron 壳（不再使用 Tauri） |
 | v0.10 | 2026-09-13 | Q17 ~ Q21 全部按建议确认（Android 原生壳、厂商资质申请、FCM 仅海外兜底、iOS PWA 限制接受、macOS 公证/Windows 暂不签名） |
+| v0.11 | 2026-09-13 | 新增 HarmonyOS NEXT 客户端：PWA 原生壳（ArkTS + ArkWeb + 华为 Push Kit，FCM 不可用直接降级 ntfy） |
 
 ---
 
@@ -93,7 +94,7 @@
 flowchart TB
     subgraph Clients[客户端]
         WEB[Web 门户 Nuxt 3 / PWA]
-        MOB[Android 壳 App / iOS PWA]
+        MOB[Android / HarmonyOS 壳 App / iOS PWA]
         DESK[桌面端 Electron]
     end
 
@@ -160,7 +161,7 @@ flowchart TB
 | redis | 基础设施 | Redis 7 | 缓存、会话、事件总线（Streams） | 6379 |
 
 - 存储后端不在容器清单内：优先连接**已有 S3 兼容服务**（AWS S3、阿里云 OSS、腾讯 COS 等）；无 S3 时使用**本地磁盘后端**（挂载卷 `storage_data`），由 `crates/storage` 统一抽象、配置切换。
-- 桌面端与移动端 App 为构建产物，不占容器；构建与分发见 13.7 与第 18 章。
+- 桌面端与移动端 App 为构建产物，不占容器；构建与分发见 13.8 与第 18 章。
 
 ### 2.3 技术选型
 
@@ -181,7 +182,7 @@ flowchart TB
 | Web 前端 | Nuxt 3（Vue 3 + TS）+ Tailwind CSS + Pinia + TanStack Query | 统一门户 |
 | 文档编辑器 | Milkdown（ProseMirror）+ KaTeX + 自定义插件 | 所见即所得 Markdown/LaTeX，内嵌图片与视频 |
 | Office 预览 | OnlyOffice Document Server + WOPI | 网盘内 Office 文件在线预览；编辑 P2 可开，可整体禁用 |
-| 客户端形态 | iOS PWA + Android 原生壳（WebView） + Electron 壳 | 共用 packages/ui、packages/core；推送见 13.6 |
+| 客户端形态 | iOS PWA + Android/HarmonyOS 原生壳 + Electron 壳 | 共用 packages/ui、packages/core；推送见 13.7 |
 | API 文档 | utoipa 生成 OpenAPI 3 | 前端 SDK 由 openapi-typescript 生成 |
 | 可观测性 | tracing + OpenTelemetry（可选接入 Loki/Grafana） | 结构化日志到 stdout |
 | 测试 | Rust: cargo test + testcontainers；前端: Vitest；E2E: Playwright | CI 全量执行 |
@@ -213,6 +214,7 @@ club-oa/                      # 主仓库：docs + deploy + scripts + 子模块
 │   ├── web/                  # 子模块 club-oa-web（Nuxt 3 门户 + BFF）
 │   ├── pwa/                  # iOS PWA（与 web 共享代码）
 │   ├── android-shell/        # Android 原生壳（WebView + 厂商推送）
+│   ├── harmony-shell/        # HarmonyOS NEXT 壳（ArkTS + ArkWeb + Push Kit）
 │   └── electron/             # 桌面端 Electron 壳
 ├── packages/                 # 子模块 club-oa-fe-libs（ui / core / config）
 ├── deploy/                   # docker-compose / nginx / mail / postgres 初始化
@@ -466,12 +468,12 @@ POST /api/v1/auth/guest/exchange
 | ntfy 实时推送 | Web / PWA / 桌面端 | 浏览器 Service Worker 或 SSE 订阅；桌面通知 |
 | ntfy 即时推送 | Android/iOS 前台 | App 内订阅 SSE/WebSocket |
 | APNs / Web Push | iOS（PWA） | iOS 16.4+ Web Push（ntfy VAPID，系统层经 APNs 投递）；保留 notify 直连 APNs 能力（HTTP/2 + JWT） |
-| 厂商推送 | Android | 华为/荣耀/魅族/OPPO/vivo/小米各自推送服务；设备注册 vendor + token |
+| 厂商推送 | Android / HarmonyOS | Android：华为/荣耀/魅族/OPPO/vivo/小米；HarmonyOS NEXT：华为 Push Kit；设备注册 vendor + token |
 | FCM | Android 兜底 | 厂商通道不可用/未覆盖机型时使用；中国大陆网络通常不可用（见 Q19） |
 | ntfy | 全部兜底 | 桌面 Electron 常驻、Android 前台服务或官方 ntfy App、Web/PWA SSE |
 | 邮件 | 全部 | 经自建 mail 服务发信：账号激活、密码重置、活动通知等；**不提供短信通道** |
 
-- 投递优先级（在 13.6 展开）：设备厂商通道 → FCM → ntfy；任何通道失败均保留站内通知。
+- 投递优先级（在 13.7 展开）：设备厂商通道 → FCM → ntfy；任何通道失败均保留站内通知。
 
 ### 5.2 ntfy 集成设计
 
@@ -716,7 +718,7 @@ flowchart LR
 - 媒体参数：音频 Opus 48kHz；视频 H.264（兼容性优先），最高 1080p30，多档 simulcast（180p/360p/720p，1080p 可选）；屏幕共享独立轨道（高分辨率、低帧率）。
 - 加密：信令与 API 走 HTTPS，媒体走 DTLS-SRTP；不做端到端加密（已确认）。
 - 移动端 WebRTC：iOS PWA 使用 WebKit（getUserMedia 可用；无 getDisplayMedia，不能共享屏幕但可观看）；Android 壳的 WebView 支持摄像头/麦克风，屏幕共享不做（P2 评估）。
-- 桌面端（Electron 内嵌 Chromium）：摄像头/麦克风/屏幕共享在 Windows/macOS/Linux 均可用，会议体验三端一致（详见 13.5）。
+- 桌面端（Electron 内嵌 Chromium）：摄像头/麦克风/屏幕共享在 Windows/macOS/Linux 均可用，会议体验三端一致（详见 13.6）。
 
 规模设计（已确认单场最多 200 人）：
 
@@ -1134,6 +1136,7 @@ sequenceDiagram
 | --- | --- | --- |
 | iOS | **PWA（无原生 App）** | Safari 打开 → 添加到主屏幕；推送走 Web Push（ntfy VAPID，系统层经 APNs 投递） |
 | Android | **PWA 原生壳 App** | WebView 加载 PWA 资源 + 原生桥；后台推送接厂商通道 |
+| HarmonyOS NEXT | **PWA 原生壳 App** | ArkTS + ArkWeb 加载 PWA 资源 + 原生桥；推送走华为 Push Kit（HarmonyOS 版） |
 | 桌面（Windows/macOS/Linux） | **Electron 壳** | 内嵌 Chromium，会议/屏幕共享全平台一致；electron-updater 自动更新 |
 
 - 不再使用 Tauri（原方案作废）。
@@ -1173,7 +1176,23 @@ sequenceDiagram
 
 > 已确认（Q17）：Android 壳使用**原生 Kotlin WebView 壳**，厂商推送 SDK 直连、包体最小。
 
-### 13.4 iOS（PWA，无原生 App）
+### 13.4 HarmonyOS NEXT（PWA 原生壳）
+
+| 编号 | 需求 | 优先级 |
+| --- | --- | --- |
+| HARM-001 | 壳：ArkTS + ArkWeb（Web 组件）加载 PWA（打包离线资源 + 增量更新），提供原生桥 | P0 |
+| HARM-002 | 原生能力：文件选择、拍照/相册、扫码（签到）、系统分享 | P0 |
+| HARM-003 | 推送：华为 Push Kit（HarmonyOS 版）接入；失效/未覆盖时降级 ntfy（HarmonyOS 无 FCM/Google 服务） | P0 |
+| HARM-004 | 安全存储：Refresh Token 存 HarmonyOS 安全存储（huks/KeyStore） | P0 |
+| HARM-005 | 深链：会议邀请、活动报名、分享链接唤起 App | P0 |
+| HARM-006 | 离线：本地缓存可读，恢复后增量同步 | P1 |
+| HARM-007 | 会议：ArkWeb 内嵌参会（音视频可用；屏幕共享不做，P2 评估） | P0 |
+| HARM-008 | 应用内检查更新（跳转应用市场或下载 .hap 安装） | P1 |
+
+- 分发：华为应用市场（AppGallery）上架或内部分发（需鸿蒙开发者账号与应用签名证书）。
+- 兼容：HarmonyOS NEXT 5.0+（ArkWeb 需较新版本）。
+
+### 13.5 iOS（PWA，无原生 App）
 
 | 编号 | 需求 | 优先级 |
 | --- | --- | --- |
@@ -1185,7 +1204,7 @@ sequenceDiagram
 
 - 限制：无系统级后台常驻；推送必须安装到主屏幕并授权；无屏幕共享；无 App Store 上架需求。
 
-### 13.5 会议能力对照（客户端）
+### 13.6 会议能力对照（客户端）
 
 | 平台 | 摄像头/麦克风 | 屏幕共享 | 说明 |
 | --- | --- | --- | --- |
@@ -1194,12 +1213,12 @@ sequenceDiagram
 | iOS PWA（WebKit） | 支持 | 不支持 | 内嵌参会，可观看共享 |
 | Web 浏览器 | 支持 | 支持 | 完整能力 |
 
-### 13.6 推送（多厂商 + FCM + ntfy 兜底）
+### 13.7 推送（多厂商 + FCM + ntfy 兜底）
 
 **投递优先级（逐级降级，全部失败保留站内通知）**：
 
 1. **Apple（iOS PWA）**：APNs —— 通过 Web Push（ntfy VAPID）投递；notify 保留直连 APNs 能力（HTTP/2 + JWT）备用。
-2. **Android 厂商通道**：按设备厂商（华为/荣耀/魅族/OPPO/vivo/小米）调用对应推送服务。
+2. **Android / HarmonyOS 厂商通道**：Android 按设备厂商（华为/荣耀/魅族/OPPO/vivo/小米）调用对应推送服务；HarmonyOS NEXT 走华为 Push Kit（HarmonyOS 版），其 FCM 不可用，失败直接降级 ntfy。
 3. **FCM**：厂商通道不可用或未覆盖机型时使用；**中国大陆网络通常不可用**（主要面向海外/特殊机型，已确认见 Q19）。
 4. **ntfy**：最终兜底 —— 桌面 Electron 常驻订阅、Android 前台服务维持订阅、Web/PWA SSE、官方 ntfy App。
 
@@ -1207,7 +1226,7 @@ sequenceDiagram
 - 凭据：各厂商开发者账号与 AppKey/AppSecret、FCM 服务账号、ntfy Token、APNs 密钥（备用）统一在 notify 服务配置（见 18.2）。
 - 隐私：推送仅含标题、摘要与深链，不含正文。
 
-### 13.7 构建与发布
+### 13.8 构建与发布
 
 | 平台 | 产物与分发 | 更新方式 |
 | --- | --- | --- |
@@ -1331,7 +1350,7 @@ sequenceDiagram
 | 性能 | 常规 API P95 < 200ms（同城网络，不含上传下载）；WS 消息端到端 < 500ms |
 | 容量 | 设计规模：1000 成员账号、100 并发在线、单群 500 人、域名邮箱 500 个；会议为条件模块：目标单场最多 200 人（大会议模式，常规 ≤ 50 人），资源评估不通过时降级或不做（见 C17） |
 | 可用性 | 单机部署目标 99.5%；服务崩溃自动重启（restart: unless-stopped）；健康检查 |
-| 兼容性 | 浏览器：Chrome/Edge 最新两个大版本、Safari 16+、Firefox 最新；Android 8+（壳内 WebView 需较新 Chromium）；iOS 16.4+（PWA 推送）；桌面 Electron 支持 Windows 10+、macOS 12+、Ubuntu 22.04+ |
+| 兼容性 | 浏览器：Chrome/Edge 最新两个大版本、Safari 16+、Firefox 最新；Android 8+（壳内 WebView 需较新 Chromium）；HarmonyOS NEXT 5.0+；iOS 16.4+（PWA 推送）；桌面 Electron 支持 Windows 10+、macOS 12+、Ubuntu 22.04+ |
 | 可观测 | 结构化 JSON 日志（traceId 贯穿）；/healthz /readyz；可选 Prometheus 指标 |
 | 可维护 | 统一错误码表；OpenAPI 文档；迁移脚本；一键 compose 部署文档 |
 | 可扩展 | 服务无状态（除 WS/SFU 会话，可后续引入 Redis 广播与 SFU 级联横向扩展）；存储/PG/Redis 可替换为托管服务 |
@@ -1422,6 +1441,8 @@ VIVO_PUSH_APP_KEY=...
 VIVO_PUSH_APP_SECRET=...
 MEIZU_PUSH_APP_ID=...
 MEIZU_PUSH_APP_KEY=...
+HARMONY_PUSH_CLIENT_ID=...
+HARMONY_PUSH_CLIENT_SECRET=...
 FCM_PROJECT_ID=...
 FCM_SERVICE_ACCOUNT_JSON=/run/secrets/fcm.json
 
@@ -1473,6 +1494,7 @@ MEETING_MAX_PARTICIPANTS=200
 | M9b | Android 壳 App：WebView 壳 + 原生桥 + 厂商推送 + 扫码/文件 | Android APK/AAB | 12-18 人日 |
 | M9c | iOS PWA：安装指引 + Web Push 订阅 + 离线壳 | 可安装 PWA（无安装包） | 4-6 人日 |
 | M9d | 多厂商推送接入：华为/荣耀/魅族/OPPO/vivo/小米 + FCM 兜底 | 各厂商通道联调通过 | 8-12 人日 |
+| M9e | HarmonyOS NEXT 壳：ArkTS + ArkWeb + Push Kit | HarmonyOS 安装包（.hap） | 8-12 人日 |
 | M10 | 联调、E2E、性能、部署文档、安全加固 | 上线版本 v1.0 | 8-12 人日 |
 
 > 说明：工作量为粗略估算，会议（条件模块，取决于 M6b 验证结果）与客户端（尤其移动端）是风险最高的两块。建议按 M1-M4 先交付 Web 核心，再评估会议与客户端投入。
@@ -1520,6 +1542,7 @@ MEETING_MAX_PARTICIPANTS=200
 | R7 | Office 在线预览需求不确定 | 增加转换服务复杂度 | 标记 P2，优先 PDF/图片/音视频预览 |
 | R8 | 邮件送达率依赖 IP 信誉与 DNS 配置 | 验证码/通知进垃圾箱 | 已确认出站走中继；仍配齐 SPF/DKIM/DMARC（入站域名需 PTR） |
 | R9 | Electron 包体积与内存占用高于 Tauri | 桌面端资源占用偏高 | 可接受（桌面端体验与一致性优先）；按需裁剪依赖 |
+| R13 | HarmonyOS NEXT 生态较新：ArkWeb 兼容性与 Push Kit 资质 | 鸿蒙端体验/推送覆盖受限 | 真机尽早验证；Push Kit 资质提前申请（并入 A9）；ntfy 兜底 |
 | R10 | 代码签名/公证缺失导致安装拦截 | 用户安装受阻、客服成本上升 | 购买证书并公证；下载页提供图文安装指引 |
 | R11 | 云服务器封禁入站 25 端口或无法设置 PTR | 域名邮箱收信不可用 | 已确认出站走中继；入站按行动项 A3 确认（收信转发/更换 VPS） |
 
@@ -1529,20 +1552,20 @@ MEETING_MAX_PARTICIPANTS=200
 | --- | --- | --- |
 | C1 | 任务看板自研，不引入 Plane/Django | 见 6.1 |
 | C2 | 客户端形态：iOS PWA、Android 原生壳、桌面 Electron（不再使用 Tauri） | 见第 13 章 |
-| C3 | 推送多通道：Apple→APNs；Android 厂商推送→FCM→ntfy 逐级兜底 | 见 5.1/13.6 |
+| C3 | 推送多通道：Apple→APNs；Android 厂商推送→FCM→ntfy 逐级兜底 | 见 5.1/13.7 |
 | C4 | 会议规模目标单场最多 200 人，支持大会议模式与 SFU 级联（条件模块，见 C17） | 见 8.2 / MEET-013 |
 | C5 | 不做虚拟背景、美颜与 E2EE，仅基础 HTTPS + DTLS-SRTP | 见 8.1 |
 | C6 | 文档支持 Markdown 导入、Markdown + LaTeX、内嵌图片与视频 | 见 7.1 |
 | C7 | 存储去除 MinIO：连接已有 S3 或使用本地磁盘后端 | 见 10.2 / 14.3 |
 | C8 | 游客禁止评论；报名仅邮箱验证码，支持域名白名单与关闭验证 | 见 2.6 / 9.3 |
-| C9 | App 上架：iOS 上架 App Store；Android 分发见 C16 | 见 13.7 |
+| C9 | App 上架：iOS 上架 App Store；Android 分发见 C16 | 见 13.8 |
 | C10 | 网关使用 nginx，替代 Caddy | 见第 2 章 |
 | C11 | 集成开源邮件服务器，为成员提供社团域名邮箱（Stalwart + Roundcube） | 见第 11 章 |
 | C12 | 关闭自助注册，仅管理员创建账号（邮箱激活后设置密码） | 用户确认；见 3.2 |
 | C13 | 存储后续可能接入阿里云 OSS | 用户确认；经 S3 兼容端点或 OSS 原生驱动，见 10.2 |
 | C14 | 邮件出站统一走中继（smarthost） | 用户确认；入站方案见行动项 A3 |
 | C15 | 网盘 Office 在线预览接入 OnlyOffice（WOPI 标准协议） | 见 10.6 |
-| C16 | App 分发：iOS 上架 App Store；Android 官网 APK 为主、不上架国内商店（Google Play 可选） | 用户确认；见 13.7 |
+| C16 | App 分发：iOS 上架 App Store；Android 官网 APK 为主、不上架国内商店（Google Play 可选） | 用户确认；见 13.8 |
 | C17 | 会议为条件模块：先技术验证（M6b）；资源需求过高时可降级规模、仅保留基础会议或直接不做 | 用户反馈；见 8.1/19 |
 
 ### 20.3 剩余行动项（非需求决策）
@@ -1570,6 +1593,7 @@ MEETING_MAX_PARTICIPANTS=200
 | Q19 | 接受 FCM 大陆不可用：境内以厂商通道 + ntfy 为准，FCM 仅海外兜底 | 已确认 |
 | Q20 | 接受 iOS PWA 限制：需 iOS 16.4+、安装到主屏幕并授权；提供安装引导页与站内红点兜底 | 已确认 |
 | Q21 | 桌面 Electron 签名：macOS 签名公证（需 Apple 开发者账号）；Windows 首版不签名并给图文指引 | 已确认（行动项 A1） |
+| Q22 | 新增 HarmonyOS NEXT 客户端：PWA 原生壳（ArkTS + ArkWeb），推送走华为 Push Kit | 已确认（用户追加） |
 
 ---
 
@@ -1587,9 +1611,9 @@ MEETING_MAX_PARTICIPANTS=200
 | 8. 公共网盘（S3/本地存储） | 第 10 章 DRV-001 ~ DRV-014 |
 | 9. 每功能一容器；Rust + Vue3 + Nuxt + Tailwind；统一风格 | 第 2 章（服务清单）、第 12 章（设计系统）、第 18 章（部署） |
 | 10. 先出需求文档（Markdown），确认后开发 | 本文档；确认方式见文末 |
-| 11. 移动端：iOS PWA + Android 壳 App | 13.1/13.3/13.4/13.5/13.6/13.7（AND-001 ~ AND-009、IOS-001 ~ IOS-005） |
-| 12. 桌面端（Windows/Linux/macOS，Electron） | 13.1/13.2/13.5/13.6/13.7（DESK-001 ~ DESK-013） |
-| 13b. 多厂商推送 + FCM + ntfy 兜底 | 5.1/5.3/13.6（NOTIFY-005/006/010） |
+| 11. 移动端：iOS PWA + Android 壳 App | 13.1/13.3/13.5/13.6/13.7/13.8（AND-001 ~ AND-009、IOS-001 ~ IOS-005） |
+| 12. 桌面端（Windows/Linux/macOS，Electron） | 13.1/13.2/13.6/13.7/13.8（DESK-001 ~ DESK-013） |
+| 13b. 多厂商推送 + FCM + ntfy 兜底 | 5.1/5.3/13.7（NOTIFY-005/006/010） |
 | 13. 集成开源邮件服务器（社团域名邮箱） | 第 11 章 MAIL-001 ~ MAIL-013 |
 | 14. 对象存储支持阿里云 OSS | 10.2 / 14.3 / C13 |
 | 15. 网盘 Office 在线预览（OnlyOffice + WOPI 标准协议） | 10.6 / DRV-009 / C15 |
