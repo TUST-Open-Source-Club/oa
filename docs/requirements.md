@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | v0.9（需求调整：推送多通道 + 客户端形态） |
+| 文档版本 | v0.10（需求已确认：推送多通道 + 客户端新形态） |
 | 日期 | 2026-09-13 |
 | 状态 | 需求确认阶段，未开始编码 |
 | 范围 | 需求定义 + 总体架构 + 接口约定 + 部署方案 |
@@ -40,6 +40,7 @@
 | v0.7 | 2026-09-13 | 仓库拆分：主仓库 + 12 个组件仓库（libs/8 服务/web/app/前端共享），git submodule 挂载；数据库访问层改用 SeaORM + sea-orm-migration |
 | v0.8 | 2026-09-13 | 新增代码规范：函数必须有中文文档注释（极简函数除外），关键逻辑必须行内注释，Rust 公共项开启 missing_docs 检查 |
 | v0.9 | 2026-09-13 | 推送改为多通道：Apple 走 APNs，Android 按厂商走华为/荣耀/魅族/OPPO/vivo/小米推送，逐级兜底 FCM → ntfy；客户端形态调整：iOS 不做原生 App（PWA），Android 改为 PWA 原生壳，桌面端改为 Electron 壳（不再使用 Tauri） |
+| v0.10 | 2026-09-13 | Q17 ~ Q21 全部按建议确认（Android 原生壳、厂商资质申请、FCM 仅海外兜底、iOS PWA 限制接受、macOS 公证/Windows 暂不签名） |
 
 ---
 
@@ -1170,7 +1171,7 @@ sequenceDiagram
 | AND-008 | 会议：WebView 内嵌参会（音视频可用；屏幕共享不做，P2 评估） | P0 |
 | AND-009 | 应用内检查更新（下载安装包） | P1 |
 
-【待确认 Q17】Android 壳技术选型：原生 Kotlin WebView 壳（推荐，厂商推送 SDK 直连、包体最小）还是 Capacitor/其他混合框架？
+> 已确认（Q17）：Android 壳使用**原生 Kotlin WebView 壳**，厂商推送 SDK 直连、包体最小。
 
 ### 13.4 iOS（PWA，无原生 App）
 
@@ -1199,7 +1200,7 @@ sequenceDiagram
 
 1. **Apple（iOS PWA）**：APNs —— 通过 Web Push（ntfy VAPID）投递；notify 保留直连 APNs 能力（HTTP/2 + JWT）备用。
 2. **Android 厂商通道**：按设备厂商（华为/荣耀/魅族/OPPO/vivo/小米）调用对应推送服务。
-3. **FCM**：厂商通道不可用或未覆盖机型时使用；**中国大陆网络通常不可用**（主要面向海外/特殊机型，见 Q19）。
+3. **FCM**：厂商通道不可用或未覆盖机型时使用；**中国大陆网络通常不可用**（主要面向海外/特殊机型，已确认见 Q19）。
 4. **ntfy**：最终兜底 —— 桌面 Electron 常驻订阅、Android 前台服务维持订阅、Web/PWA SSE、官方 ntfy App。
 
 - 设备注册：同一设备可同时上报多个 token（厂商 token + FCM token），记录 `vendor`；notify 按 vendor 选路，发送失败记录并降级。
@@ -1214,7 +1215,7 @@ sequenceDiagram
 | 桌面 Electron | Windows NSIS/MSI、macOS DMG、Linux AppImage+deb | electron-updater（nginx/S3 托管更新清单） |
 | iOS | 无安装包；门户安装指引（添加到主屏幕） | 刷新即更新（Service Worker） |
 
-- 签名：Android keystore；macOS Developer ID + 公证；Windows 代码签名可选（见 20.4 Q21）。
+- 签名：Android keystore；macOS Developer ID + 公证；Windows 代码签名可选（已确认见 Q21）。
 
 ## 14. 数据与存储
 
@@ -1550,7 +1551,7 @@ MEETING_MAX_PARTICIPANTS=200
 
 | 编号 | 事项 | 说明 |
 | --- | --- | --- |
-| A1 | Apple 开发者账号（可选）：仅 APNs 直连备用；PWA Web Push 不需要 | 视 Q19/Q20 结论决定是否申请 |
+| A1 | 申请 Apple 开发者账号 | macOS 签名公证必需；APNs 直连备用；iOS 无需上架 |
 | A2 | 确认阿里云 OSS 区域与 S3 兼容端点，或确认改用本地存储 | 接入存储前 |
 | A3 | 确认邮件入站方案：25 端口可用性，或选用收信转发服务 | 部署邮件服务前必须完成 |
 | A4 | 确认服务器配置与带宽（会议场景建议 16C32G + 1Gbps） | 部署前；同时作为 M6b 技术验证的输入 |
@@ -1558,16 +1559,17 @@ MEETING_MAX_PARTICIPANTS=200
 | A6 | 确认邮箱默认配额与邮件组清单（默认 2GB/人、`all@`/`board@`） | 邮箱开通前 |
 | A7 | 设计风格最终确认（默认靛蓝 + 暗色） | M0 出稿后 |
 | A8 | 确认会议技术验证的验收标准（人数、带宽、月度预算） | 进入 M6b 前 |
+| A9 | 申请厂商推送账号/资质（华为/荣耀/魅族/OPPO/vivo/小米）与 FCM 项目 | 推送实现并行推进，缺失厂商自动降级 |
 
-### 20.4 本轮新增待确认（v0.9 调整）
+### 20.4 已确认决策（v0.9 调整，全部接受建议）
 
-| 编号 | 问题 | 建议 |
+| 编号 | 决策 | 说明 |
 | --- | --- | --- |
-| Q17 | Android 壳技术选型：原生 Kotlin WebView 壳 vs Capacitor 等混合框架？ | 推荐原生 Kotlin WebView 壳（厂商推送 SDK 直连、包体最小） |
-| Q18 | 厂商推送账号/资质（华为/荣耀/魅族/OPPO/vivo/小米）是否具备？ | 提前申请；缺失的厂商自动降级 FCM/ntfy |
-| Q19 | FCM 在中国大陆不可用（依赖 Google 服务），仅作海外兜底，是否接受？ | 接受；境内以厂商通道 + ntfy 为准 |
-| Q20 | iOS PWA 推送需 iOS 16.4+ 且安装到主屏幕并授权，是否接受？ | 接受；提供安装引导页与站内红点兜底 |
-| Q21 | 桌面 Electron 签名/公证：macOS 签名公证、Windows 是否购买代码签名？ | macOS 签名公证；Windows 首版不签名并给图文指引 |
+| Q17 | Android 壳：**原生 Kotlin WebView 壳**（厂商推送 SDK 直连、包体最小） | 已确认 |
+| Q18 | 厂商推送账号/资质：由社团**提前申请**；申请期间缺失厂商自动降级 FCM/ntfy | 已确认（行动项 A9） |
+| Q19 | 接受 FCM 大陆不可用：境内以厂商通道 + ntfy 为准，FCM 仅海外兜底 | 已确认 |
+| Q20 | 接受 iOS PWA 限制：需 iOS 16.4+、安装到主屏幕并授权；提供安装引导页与站内红点兜底 | 已确认 |
+| Q21 | 桌面 Electron 签名：macOS 签名公证（需 Apple 开发者账号）；Windows 首版不签名并给图文指引 | 已确认（行动项 A1） |
 
 ---
 
