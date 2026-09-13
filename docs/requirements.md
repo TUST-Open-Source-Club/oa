@@ -55,7 +55,7 @@
 
 1. **统一**：统一账号、统一门户、统一 UI 风格、统一通知体系。
 2. **自研可控**：核心功能全部自行实现，不依赖第三方 SaaS；外部仅使用基础设施与开源组件（PostgreSQL、Redis、ntfy、nginx、Stalwart 邮件服务等）。
-3. **多端**：Web 门户 + iOS PWA + Android 原生壳 App + 桌面端（Windows / macOS / Linux，Electron 壳），前端代码（Vue 3 + Tailwind）三端复用。
+3. **多端**：Web 门户 + iOS PWA + Android 原生壳 + HarmonyOS NEXT 原生壳 + 桌面端（Windows / macOS / Linux，Electron 壳），前端代码（Vue 3 + Tailwind）多端复用。
 4. **开放**：非注册人员可通过邀请链接参与会议、报名活动、访问分享的网盘文件。
 5. **可部署**：单机 Docker Compose 一键部署；预留横向扩展能力。
 
@@ -1231,6 +1231,7 @@ sequenceDiagram
 | 平台 | 产物与分发 | 更新方式 |
 | --- | --- | --- |
 | Android | AAB/APK；应用商店（Google Play 可选，国内厂商商店按需）+ 官网 APK 兜底 | 应用内检查更新 / 商店更新 |
+| HarmonyOS NEXT | .hap；华为应用市场（AppGallery）或内部分发（需鸿蒙开发者账号与签名证书） | 应用市场更新 / 内部分发检查更新 |
 | 桌面 Electron | Windows NSIS/MSI、macOS DMG、Linux AppImage+deb | electron-updater（nginx/S3 托管更新清单） |
 | iOS | 无安装包；门户安装指引（添加到主屏幕） | 刷新即更新（Service Worker） |
 
@@ -1582,7 +1583,7 @@ MEETING_MAX_PARTICIPANTS=200
 | A6 | 确认邮箱默认配额与邮件组清单（默认 2GB/人、`all@`/`board@`） | 邮箱开通前 |
 | A7 | 设计风格最终确认（默认靛蓝 + 暗色） | M0 出稿后 |
 | A8 | 确认会议技术验证的验收标准（人数、带宽、月度预算） | 进入 M6b 前 |
-| A9 | 申请厂商推送账号/资质（华为/荣耀/魅族/OPPO/vivo/小米）与 FCM 项目 | 推送实现并行推进，缺失厂商自动降级 |
+| A9 | 申请厂商推送账号/资质（华为/荣耀/魅族/OPPO/vivo/小米/华为 Push Kit）与 FCM 项目；鸿蒙开发者账号 | 推送实现并行推进，缺失厂商自动降级 |
 
 ### 20.4 已确认决策（v0.9 调整，全部接受建议）
 
@@ -1611,7 +1612,7 @@ MEETING_MAX_PARTICIPANTS=200
 | 8. 公共网盘（S3/本地存储） | 第 10 章 DRV-001 ~ DRV-014 |
 | 9. 每功能一容器；Rust + Vue3 + Nuxt + Tailwind；统一风格 | 第 2 章（服务清单）、第 12 章（设计系统）、第 18 章（部署） |
 | 10. 先出需求文档（Markdown），确认后开发 | 本文档；确认方式见文末 |
-| 11. 移动端：iOS PWA + Android 壳 App | 13.1/13.3/13.5/13.6/13.7/13.8（AND-001 ~ AND-009、IOS-001 ~ IOS-005） |
+| 11. 移动端：iOS PWA + Android 壳 App + HarmonyOS NEXT 壳 App | 13.1/13.3/13.4/13.5/13.6/13.7/13.8（AND-001 ~ AND-009、HARM-001 ~ HARM-008、IOS-001 ~ IOS-005） |
 | 12. 桌面端（Windows/Linux/macOS，Electron） | 13.1/13.2/13.6/13.7/13.8（DESK-001 ~ DESK-013） |
 | 13b. 多厂商推送 + FCM + ntfy 兜底 | 5.1/5.3/13.7（NOTIFY-005/006/010） |
 | 13. 集成开源邮件服务器（社团域名邮箱） | 第 11 章 MAIL-001 ~ MAIL-013 |
