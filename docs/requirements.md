@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | v0.11（新增 HarmonyOS NEXT 壳） |
+| 文档版本 | v0.12（客户端可配置服务器地址） |
 | 日期 | 2026-09-13 |
 | 状态 | 需求确认阶段，未开始编码 |
 | 范围 | 需求定义 + 总体架构 + 接口约定 + 部署方案 |
@@ -42,6 +42,7 @@
 | v0.9 | 2026-09-13 | 推送改为多通道：Apple 走 APNs，Android 按厂商走华为/荣耀/魅族/OPPO/vivo/小米推送，逐级兜底 FCM → ntfy；客户端形态调整：iOS 不做原生 App（PWA），Android 改为 PWA 原生壳，桌面端改为 Electron 壳（不再使用 Tauri） |
 | v0.10 | 2026-09-13 | Q17 ~ Q21 全部按建议确认（Android 原生壳、厂商资质申请、FCM 仅海外兜底、iOS PWA 限制接受、macOS 公证/Windows 暂不签名） |
 | v0.11 | 2026-09-13 | 新增 HarmonyOS NEXT 客户端：PWA 原生壳（ArkTS + ArkWeb + 华为 Push Kit，FCM 不可用直接降级 ntfy） |
+| v0.12 | 2026-09-13 | 所有客户端支持服务器地址配置与切换（不硬编码 Base URL）；Web 同源默认 |
 
 ---
 
@@ -1142,6 +1143,17 @@ sequenceDiagram
 - 不再使用 Tauri（原方案作废）。
 - 前端代码复用：`packages/ui`（组件/样式）、`packages/core`（SDK/store/WS/通知抽象）为 Web/PWA、Android 壳、Electron 共用；平台差异由适配层（storage、notifier、filePicker、share、updater）隔离。
 
+### 13.1.1 服务器地址配置（所有客户端，已确认）
+
+- **Web 门户**：同源访问，默认使用当前访问域名调用 API；通过部署环境变量配置后端地址（BFF），无需客户端输入。
+- **iOS PWA / Android 壳 / HarmonyOS 壳 / Electron**：**不得硬编码服务器地址**，构建产物不包含默认域名。
+  - 首次启动进入「服务器设置」页：输入 Base URL（HTTPS 建议），校验 `/.well-known/openid-configuration` 可达且 issuer 合法后方可保存。
+  - 地址持久化在本地安全存储；设置页可随时切换服务器。
+  - 切换服务器时：清除本地令牌、缓存与未发送队列，回到登录页。
+  - 支持深链/二维码携带 `server` 参数（如邀请链接 `?server=https://oa.example.com`），实现一键完成配置。
+  - 多环境提示：显示服务器名称/logo（来自 OIDC discovery 或 `/.well-known/club-oa` 扩展字段）避免连错环境。
+- 新增需求：AND-010、HARM-009、IOS-006、DESK-014（均为 P0，服务器地址配置与切换）。
+
 ### 13.2 桌面端（Electron：Windows / macOS / Linux）
 
 | 编号 | 需求 | 优先级 |
@@ -1159,6 +1171,7 @@ sequenceDiagram
 | DESK-011 | 文档阅读 + 编辑；任务/活动/网盘/通知中心全量功能 | P0 |
 | DESK-012 | 多窗口：独立聊天窗口、独立文档窗口 | P2 |
 | DESK-013 | 截图/粘贴板图片直接发送 | P2 |
+| DESK-014 | 服务器地址配置与切换（不硬编码；见 13.1.1） | P0 |
 
 ### 13.3 Android（PWA 原生壳）
 
@@ -1173,6 +1186,7 @@ sequenceDiagram
 | AND-007 | 离线：本地缓存（IndexedDB/SQLite）可读，恢复后增量同步 | P1 |
 | AND-008 | 会议：WebView 内嵌参会（音视频可用；屏幕共享不做，P2 评估） | P0 |
 | AND-009 | 应用内检查更新（下载安装包） | P1 |
+| AND-010 | 服务器地址配置与切换（不硬编码；见 13.1.1） | P0 |
 
 > 已确认（Q17）：Android 壳使用**原生 Kotlin WebView 壳**，厂商推送 SDK 直连、包体最小。
 
@@ -1188,6 +1202,7 @@ sequenceDiagram
 | HARM-006 | 离线：本地缓存可读，恢复后增量同步 | P1 |
 | HARM-007 | 会议：ArkWeb 内嵌参会（音视频可用；屏幕共享不做，P2 评估） | P0 |
 | HARM-008 | 应用内检查更新（跳转应用市场或下载 .hap 安装） | P1 |
+| HARM-009 | 服务器地址配置与切换（不硬编码；见 13.1.1） | P0 |
 
 - 分发：华为应用市场（AppGallery）上架或内部分发（需鸿蒙开发者账号与应用签名证书）。
 - 兼容：HarmonyOS NEXT 5.0+（ArkWeb 需较新版本）。
@@ -1201,6 +1216,7 @@ sequenceDiagram
 | IOS-003 | 会议：WebKit 内嵌参会（getUserMedia 可用；不能共享屏幕，可观看；后台中断提示） | P0 |
 | IOS-004 | 扫码签到：调用摄像头扫码（Web API，或跳转系统相机识别） | P1 |
 | IOS-005 | 安装指引页（门户 `/download#ios`，图文说明添加到主屏幕） | P0 |
+| IOS-006 | 服务器地址配置与切换（不硬编码；见 13.1.1） | P0 |
 
 - 限制：无系统级后台常驻；推送必须安装到主屏幕并授权；无屏幕共享；无 App Store 上架需求。
 
