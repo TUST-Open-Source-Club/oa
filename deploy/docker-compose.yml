@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
     command: ['serve']
     environment:
-      NTFY_BASE_URL: ${NTFY_PUBLIC_URL:-http://localhost/ntfy}
+      NTFY_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ntfy_data:/var/lib/ntfy

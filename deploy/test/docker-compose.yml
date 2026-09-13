@@ -25,6 +25,7 @@ x-db-env: &db-env
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: cluboa
       POSTGRES_DB: club_oa
@@ -36,23 +37,26 @@ services:
       interval: 3s
       timeout: 3s
       retries: 30
+      start_period: 15s
     networks: [internal]
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     command: ['redis-server', '--appendonly', 'no']
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 3s
       timeout: 3s
       retries: 30
+      start_period: 5s
     networks: [internal]
 
   ntfy:
     image: binwiederhier/ntfy:latest
     command: ['serve']
     environment:
-      NTFY_BASE_URL: http://localhost:8088/ntfy
+      NTFY_BASE_URL: http://localhost:8088
       TZ: Asia/Shanghai
     networks: [internal]
 
@@ -61,7 +65,7 @@ services:
     build: { context: ../../services/auth }
     environment:
       <<: *db-env
-      AUTH_ISSUER: http://gateway
+      AUTH_ISSUER: http://auth:8081
       WEB_BASE_URL: http://localhost:8088
       INTERNAL_SERVICE_SECRET: test-internal-secret
       DEV_MODE: 'true'
@@ -78,13 +82,14 @@ services:
       interval: 5s
       timeout: 5s
       retries: 60
+      start_period: 30s
 
   im:
     <<: *app-common
     build: { context: ../../services/im }
     environment:
       <<: *db-env
-      AUTH_ISSUER: http://gateway
+      AUTH_ISSUER: http://auth:8081
       INTERNAL_SERVICE_SECRET: test-internal-secret
       REDIS_URL: redis://redis:6379
       RUST_LOG: info
@@ -103,7 +108,7 @@ services:
     build: { context: ../../services/task }
     environment:
       <<: *db-env
-      AUTH_ISSUER: http://gateway
+      AUTH_ISSUER: http://auth:8081
       REDIS_URL: redis://redis:6379
       RUST_LOG: info
     depends_on:
@@ -121,7 +126,7 @@ services:
     build: { context: ../../services/doc }
     environment:
       <<: *db-env
-      AUTH_ISSUER: http://gateway
+      AUTH_ISSUER: http://auth:8081
       RUST_LOG: info
     depends_on:
       postgres: { condition: service_healthy }
@@ -137,7 +142,7 @@ services:
     build: { context: ../../services/event }
     environment:
       <<: *db-env
-      AUTH_ISSUER: http://gateway
+      AUTH_ISSUER: http://auth:8081
       REDIS_URL: redis://redis:6379
       DEV_MODE: 'true'
       RUST_LOG: info
@@ -156,7 +161,7 @@ services:
     build: { context: ../../services/drive }
     environment:
       <<: *db-env
-      AUTH_ISSUER: http://gateway
+      AUTH_ISSUER: http://auth:8081
       STORAGE_DRIVER: local
       STORAGE_LOCAL_PATH: /data/storage
       STORAGE_SECRET: test-storage-secret
@@ -181,7 +186,7 @@ services:
     build: { context: ../../services/notify }
     environment:
       <<: *db-env
-      AUTH_ISSUER: http://gateway
+      AUTH_ISSUER: http://auth:8081
       INTERNAL_SERVICE_SECRET: test-internal-secret
       REDIS_URL: redis://redis:6379
       NTFY_BASE_URL: http://ntfy:80

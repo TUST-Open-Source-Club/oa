@@ -8,7 +8,8 @@ ADMIN_EMAIL="${ADMIN_EMAIL:-admin@club.test}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-Admin12345!}"
 USER_PASSWORD="${USER_PASSWORD:-Member12345!}"
 
-log() { printf '[seed] %s\n' "$*"; }
+# 注意：日志写 stderr，避免污染命令替换（如 ensure_user 的 stdout 返回值）
+log() { printf '[seed] %s\n' "$*" >&2; }
 die() { printf '[seed] 失败：%s\n' "$*" >&2; exit 1; }
 
 # api METHOD PATH [TOKEN] [JSON_BODY]

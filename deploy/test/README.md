@@ -39,6 +39,6 @@ docker compose logs -f seed                  # 查看种子数据写入结果
 
 ## 说明
 
-- `AUTH_ISSUER=http://gateway`：容器内服务经网关取 JWKS；浏览器访问 `localhost:8088` 不受影响。
+- `AUTH_ISSUER=http://auth:8081`：容器内服务直连 auth 取 JWKS（避免对 gateway 的循环依赖）；浏览器访问 `localhost:8088` 不受影响，OIDC discovery 返回的 issuer 为内部地址。
 - 网关同时暴露 `/api/v1/{auth,im,task,event,doc,drive,notify}`、`/ws/`（IM WebSocket）与 `/ntfy/`。
 - 所有数据卷以 `test_` 前缀命名，与生产编排隔离。
