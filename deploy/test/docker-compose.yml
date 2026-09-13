@@ -1,0 +1,277 @@
+# 社团 OA 一体化测试环境
+#
+# 目标：只依赖本 compose 即可把「不依赖第三方服务」的功能全部跑起来：
+# - 自建：PostgreSQL / Redis / ntfy（自托管推送）
+# - 自研服务：auth / im / task / event / doc / drive / notify / web / gateway
+# - 不包含：邮件服务器（DEV_MODE 下验证码与激活链接直接返回/打日志）、
+#   S3（drive 使用本地存储）、厂商推送（日志降级）、OnlyOffice（可选，另起）
+#
+# 用法：
+#   docker compose --profile seed up --build    # 启动并灌入演示数据
+#   docker compose logs -f seed                 # 查看种子结果
+#   docker compose down -v                      # 彻底重置
+#
+# 访问：http://localhost:8088（门户）
+# 账号：admin@club.test / Admin12345!   member1@club.test / Member12345!
+name: club-oa-test
+
+x-app-common: &app-common
+  restart: "no"
+  networks: [internal]
+
+x-db-env: &db-env
+  DATABASE_URL: postgres://postgres:cluboa@postgres:5432/club_oa
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: cluboa
+      POSTGRES_DB: club_oa
+      TZ: Asia/Shanghai
+    volumes:
+      - test_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'no']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    networks: [internal]
+
+  ntfy:
+    image: binwiederhier/ntfy:latest
+    command: ['serve']
+    environment:
+      NTFY_BASE_URL: http://localhost:8088/ntfy
+      TZ: Asia/Shanghai
+    networks: [internal]
+
+  auth:
+    <<: *app-common
+    build: { context: ../../services/auth }
+    environment:
+      <<: *db-env
+      AUTH_ISSUER: http://gateway
+      WEB_BASE_URL: http://localhost:8088
+      INTERNAL_SERVICE_SECRET: test-internal-secret
+      DEV_MODE: 'true'
+      KEY_DIR: /data/keys
+      BOOTSTRAP_ADMIN_EMAIL: admin@club.test
+      BOOTSTRAP_ADMIN_PASSWORD: Admin12345!
+      RUST_LOG: info
+    volumes:
+      - test_auth_data:/data
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8081/healthz || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  im:
+    <<: *app-common
+    build: { context: ../../services/im }
+    environment:
+      <<: *db-env
+      AUTH_ISSUER: http://gateway
+      INTERNAL_SERVICE_SECRET: test-internal-secret
+      REDIS_URL: redis://redis:6379
+      RUST_LOG: info
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      auth: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8082/healthz || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  task:
+    <<: *app-common
+    build: { context: ../../services/task }
+    environment:
+      <<: *db-env
+      AUTH_ISSUER: http://gateway
+      REDIS_URL: redis://redis:6379
+      RUST_LOG: info
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      auth: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8083/healthz || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  doc:
+    <<: *app-common
+    build: { context: ../../services/doc }
+    environment:
+      <<: *db-env
+      AUTH_ISSUER: http://gateway
+      RUST_LOG: info
+    depends_on:
+      postgres: { condition: service_healthy }
+      auth: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8084/healthz || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  event:
+    <<: *app-common
+    build: { context: ../../services/event }
+    environment:
+      <<: *db-env
+      AUTH_ISSUER: http://gateway
+      REDIS_URL: redis://redis:6379
+      DEV_MODE: 'true'
+      RUST_LOG: info
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      auth: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8086/healthz || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  drive:
+    <<: *app-common
+    build: { context: ../../services/drive }
+    environment:
+      <<: *db-env
+      AUTH_ISSUER: http://gateway
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_PATH: /data/storage
+      STORAGE_SECRET: test-storage-secret
+      UPLOAD_TMP_DIR: /data/uploads
+      WOPI_BASE_URL: http://drive:8087
+      ONLYOFFICE_JWT_SECRET: test-onlyoffice-secret
+      ONLYOFFICE_PUBLIC_URL: http://localhost:8080
+      RUST_LOG: info
+    volumes:
+      - test_drive_data:/data
+    depends_on:
+      postgres: { condition: service_healthy }
+      auth: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8087/healthz || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  notify:
+    <<: *app-common
+    build: { context: ../../services/notify }
+    environment:
+      <<: *db-env
+      AUTH_ISSUER: http://gateway
+      INTERNAL_SERVICE_SECRET: test-internal-secret
+      REDIS_URL: redis://redis:6379
+      NTFY_BASE_URL: http://ntfy:80
+      NTFY_PUBLIC_URL: http://localhost:8088/ntfy
+      DEV_MODE: 'true'
+      RUST_LOG: info
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      ntfy: { condition: service_started }
+      auth: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8088/healthz || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  web:
+    <<: *app-common
+    build: { context: ../../apps/web }
+    environment:
+      AUTH_SERVICE_URL: http://auth:8081
+      NOTIFY_SERVICE_URL: http://notify:8088
+      DRIVE_SERVICE_URL: http://drive:8087
+      DOC_SERVICE_URL: http://doc:8084
+      TASK_SERVICE_URL: http://task:8083
+      EVENT_SERVICE_URL: http://event:8086
+      NUXT_PUBLIC_APP_NAME: 社团 OA（测试）
+      NTFY_PUBLIC_URL: http://localhost:8088/ntfy
+      PORT: '3000'
+    depends_on:
+      auth: { condition: service_healthy }
+      task: { condition: service_healthy }
+      event: { condition: service_healthy }
+      doc: { condition: service_healthy }
+      drive: { condition: service_healthy }
+      notify: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/ || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 60
+
+  gateway:
+    image: nginx:1.27-alpine
+    restart: "no"
+    ports:
+      - '8088:80'
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      web: { condition: service_started }
+      auth: { condition: service_healthy }
+      im: { condition: service_healthy }
+      task: { condition: service_healthy }
+      event: { condition: service_healthy }
+      doc: { condition: service_healthy }
+      drive: { condition: service_healthy }
+      notify: { condition: service_healthy }
+    networks: [internal, proxy]
+
+  seed:
+    image: alpine:3.20
+    profiles: ['seed']
+    restart: "no"
+    environment:
+      GATEWAY_URL: http://gateway
+      ADMIN_EMAIL: admin@club.test
+      ADMIN_PASSWORD: Admin12345!
+      USER_PASSWORD: Member12345!
+    volumes:
+      - ./seed.sh:/seed.sh:ro
+    command: ['sh', '-c', 'apk add --no-cache curl jq >/dev/null && sh /seed.sh']
+    depends_on:
+      auth: { condition: service_healthy }
+      im: { condition: service_healthy }
+      task: { condition: service_healthy }
+      event: { condition: service_healthy }
+      doc: { condition: service_healthy }
+      drive: { condition: service_healthy }
+      notify: { condition: service_healthy }
+      gateway: { condition: service_started }
+    networks: [proxy]
+
+networks:
+  internal:
+    internal: true
+  proxy:
+
+volumes:
+  test_pg_data:
+  test_auth_data:
+  test_drive_data:
