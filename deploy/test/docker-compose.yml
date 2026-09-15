@@ -213,6 +213,7 @@ services:
       NUXT_NOTIFY_SERVICE_URL: http://gateway
       NUXT_DRIVE_SERVICE_URL: http://gateway
       NUXT_DOC_SERVICE_URL: http://gateway
+      NUXT_IM_SERVICE_URL: http://gateway
       NUXT_TASK_SERVICE_URL: http://gateway
       NUXT_EVENT_SERVICE_URL: http://gateway
       NUXT_PUBLIC_APP_NAME: 社团 OA（测试）
