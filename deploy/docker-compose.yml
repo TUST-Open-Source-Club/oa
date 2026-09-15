@@ -174,12 +174,12 @@ services:
     build:
       context: ../apps/web
     environment:
-      AUTH_SERVICE_URL: http://auth:8081
-      NOTIFY_SERVICE_URL: http://notify:8088
-      DRIVE_SERVICE_URL: http://drive:8087
-      DOC_SERVICE_URL: http://doc:8084
-      TASK_SERVICE_URL: http://task:8083
-      EVENT_SERVICE_URL: http://event:8086
+      NUXT_AUTH_SERVICE_URL: http://auth:8081
+      NUXT_NOTIFY_SERVICE_URL: http://notify:8088
+      NUXT_DRIVE_SERVICE_URL: http://drive:8087
+      NUXT_DOC_SERVICE_URL: http://doc:8084
+      NUXT_TASK_SERVICE_URL: http://task:8083
+      NUXT_EVENT_SERVICE_URL: http://event:8086
       NUXT_PUBLIC_APP_NAME: ${APP_NAME:-社团 OA}
       PORT: 3000
     networks: [internal]

@@ -190,7 +190,7 @@ services:
       INTERNAL_SERVICE_SECRET: test-internal-secret
       REDIS_URL: redis://redis:6379
       NTFY_BASE_URL: http://ntfy:80
-      NTFY_PUBLIC_URL: http://localhost:8088/ntfy
+      NUXT_PUBLIC_NTFY_PUBLIC_URL: http://localhost:8088/ntfy
       DEV_MODE: 'true'
       RUST_LOG: info
     depends_on:
@@ -208,14 +208,15 @@ services:
     <<: *app-common
     build: { context: ../../apps/web }
     environment:
-      AUTH_SERVICE_URL: http://auth:8081
-      NOTIFY_SERVICE_URL: http://notify:8088
-      DRIVE_SERVICE_URL: http://drive:8087
-      DOC_SERVICE_URL: http://doc:8084
-      TASK_SERVICE_URL: http://task:8083
-      EVENT_SERVICE_URL: http://event:8086
+      # 统一经网关：nginx 用 Docker DNS 动态解析，服务重建换 IP 不影响 BFF
+      NUXT_AUTH_SERVICE_URL: http://gateway
+      NUXT_NOTIFY_SERVICE_URL: http://gateway
+      NUXT_DRIVE_SERVICE_URL: http://gateway
+      NUXT_DOC_SERVICE_URL: http://gateway
+      NUXT_TASK_SERVICE_URL: http://gateway
+      NUXT_EVENT_SERVICE_URL: http://gateway
       NUXT_PUBLIC_APP_NAME: 社团 OA（测试）
-      NTFY_PUBLIC_URL: http://localhost:8088/ntfy
+      NUXT_PUBLIC_NTFY_PUBLIC_URL: http://localhost:8088/ntfy
       PORT: '3000'
     depends_on:
       auth: { condition: service_healthy }
