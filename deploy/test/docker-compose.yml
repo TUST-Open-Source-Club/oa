@@ -110,7 +110,10 @@ services:
       <<: *db-env
       AUTH_ISSUER: http://auth:8081
       REDIS_URL: redis://redis:6379
+      TASK_STORAGE_PATH: /data/storage
       RUST_LOG: info
+    volumes:
+      - test_task_data:/data
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -279,6 +282,7 @@ networks:
   proxy:
 
 volumes:
+  test_task_data:
   test_pg_data:
   test_auth_data:
   test_drive_data:
