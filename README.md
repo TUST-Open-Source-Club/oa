@@ -77,20 +77,20 @@ scripts/test-env.sh stop    # 停止
 ```bash
 pnpm --filter club-oa-web dev       # Web 门户（Nuxt dev server）
 pnpm --filter club-oa-web build
-pnpm typecheck                      # 共享库类型检查（packages/*）
+pnpm typecheck                      # 全部前端包类型检查（含 apps/web 的 nuxt typecheck）
 pnpm -r test                        # 全部前端包单测 + 覆盖率门禁
 pnpm --filter club-oa-electron dev  # 桌面端壳（首次需 pnpm --filter club-oa-electron rebuild electron）
 ```
 
-> `pnpm --filter club-oa-web typecheck`（`nuxt typecheck`）目前有约 30 处存量类型错误（严格模式下的数组下标/事件负载），
-> 尚未纳入门禁，待清理后启用；现状与后续动作见 [docs/migration-monorepo.md](docs/migration-monorepo.md) 第 3 节。
-
 ### 质量门禁（本地一键）
 
 ```bash
-scripts/check.sh            # fmt + clippy + test + 覆盖率 + 前端 typecheck/test
+scripts/check.sh            # fmt + clippy + test + 覆盖率 + 前端 typecheck/test/build
 scripts/check.sh --fast     # 跳过覆盖率
 ```
+
+> 覆盖率需要本地依赖：`scripts/test-env.sh start`（PostgreSQL + Redis）与
+> `libs/scripts/s3-test-env.sh start`（MinIO，跑 S3 后端集成测试）。
 
 ## 部署与联调
 
@@ -112,8 +112,10 @@ docker build -f apps/web/Dockerfile     -t club-oa/web:local  .
 ## 质量要求
 
 TDD 开发，行/语句/函数覆盖率 ≥ 80%（分支 ≥ 70%），CI 不达标禁止合并，详见 `docs/requirements.md` 19.3。
-CI（`.github/workflows/ci.yml`）执行：`cargo fmt` / `clippy -D warnings` / `cargo test --workspace` /
-`cargo llvm-cov`（行 ≥ 80%）/ 前端 `typecheck` + `test` + `build`。
+CI（`.github/workflows/ci.yml`）执行：`cargo fmt` / `clippy -D warnings` / `cargo test --workspace --features club-storage/s3`（真实 PG + Redis + MinIO）/
+`cargo llvm-cov`（**行 + 函数 ≥ 80%**，排除 `src/main.rs` 与 migrations）/ 前端 `typecheck` + `test` + `build`。
+
+当前实测：Rust 行 **85.1%**、函数 **81.9%**；前端 `apps/web` 语句 98.1%、行 100%。
 
 ## 文档
 

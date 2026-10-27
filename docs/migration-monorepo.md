@@ -72,10 +72,9 @@
 | `clippy::needless_question_mark` | `services/task/src/routes.rs::task_snapshot` | 去掉多余的 `Ok(…?)` |
 | `clippy::unnecessary_to_owned` | `services/auth/tests/account_flow.rs` | 去掉多余的 `&` 与 `.to_string()` |
 | 迁移脚本里硬编码 `CREATE SCHEMA IF NOT EXISTS <服务名>`，并行跑测试时 5 个用例同时创建同名 schema 触发 `23505 duplicate key`（`pg_namespace_nspname_index`） | 7 个服务的第一份迁移 | 移除该语句：schema 早已由 `connect_with_schema`（bootstrap 连接）创建并设置 `search_path`，迁移只负责建表 |
-
-> 已知未纳入门禁的存量问题：`apps/web` 的 `nuxt typecheck` 有约 30 处严格模式类型错误（数组下标可能为 `undefined`、
-> 事件/表单负载类型不匹配等）。原 `oa-web` CI 只跑 `test` + `build`，从未跑过 `typecheck`，因此团队未察觉。
-> 当前 CI 仅对 `packages/*` 做类型检查；清理 `apps/web` 后把 `pnpm --filter club-oa-web typecheck` 加回 CI 即可。
+| `apps/web` 的 `nuxt typecheck` 有 30 处严格模式类型错误（`noUncheckedIndexedAccess` 下的数组下标、事件/表单负载类型、Nitro `$fetch` 泛型）。原 `oa-web` CI 只跑 `test` + `build`，从未跑过 `typecheck` | `components/{FormBuilder,UserPicker,MarkdownEditor.client}.vue`、`pages/{docs,drive,events,im,tasks}.vue`、`server/utils/auth-service.ts`、`stores/notifications.spec.ts` | 加判空/类型谓词、抽出 `utils/form-schema.ts`（`toFormSchema` 收敛未知 JSON）、`$fetch` 边界处收敛类型；`pnpm -r typecheck` 已纳入 CI |
+| 报名表单 schema 在页面里用 `as` 强转后传给设计器，类型不安全 | `pages/events.vue` | 改为 `toFormSchema()` 运行时规整 + `FormSchema` 类型，新增 5 个单测 |
+| `problemOf` 只认带 `detail`/`code` 的载荷，仅有 `title` 的 ProblemDetails 会被丢弃 | `apps/web/utils/api-error.ts` | 增加 `title` 判定，补 6 个单测 |
 
 ## 4. 迁移后整仓验证（本地，2026-10-27）
 
@@ -83,17 +82,17 @@
 | --- | --- | --- |
 | 格式 | `cargo fmt --all -- --check` | 通过（首次整仓 `cargo fmt` 顺带修复了部分组件此前未格式化的代码） |
 | Lint | `cargo clippy --workspace --all-targets -- -D warnings` | 通过 |
-| Rust 测试 | `cargo test --workspace`（真实 PG 55432 + Redis 56379） | 全部通过：约 200 个用例，含 7 个服务的集成测试与共享库测试 |
-| 覆盖率 | `cargo llvm-cov --workspace --fail-under-lines 80 --ignore-filename-regex 'src/main.rs'` | 行 **80.38%**（≥ 80 通过）；函数 77.22%、区域 77.30% |
+| Rust 测试 | `cargo test --workspace --features club-storage/s3`（真实 PG 55432 + Redis 56379 + MinIO 59000） | 全部通过：约 210 个用例，含 7 个服务集成测试、S3 后端往返/预签名测试 |
+| 覆盖率 | `cargo llvm-cov --workspace --features club-storage/s3 --fail-under-lines 80 --fail-under-functions 80 --ignore-filename-regex '(src/main\.rs\|/migration)'` | 行 **85.11%**、函数 **81.91%**、区域 81.92%（均 ≥ 80） |
 | 前端安装 | `pnpm install --frozen-lockfile` | 通过（单 `pnpm-lock.yaml`） |
-| 前端测试 | `pnpm -r test` | 通过：`packages/core` 7、`packages/ui` 11、`apps/web` 20 个用例，覆盖率阈值达标 |
+| 前端类型检查 | `pnpm -r typecheck` | 通过：`packages/core`、`packages/ui`、`apps/web`（原 30 处错误全部消除） |
+| 前端测试 | `pnpm -r test` | 通过：`packages/core` 7、`packages/ui` 11、`apps/web` 31 个用例；web 语句 98.1%、行 100%、函数 100% |
 | 前端构建 | `pnpm --filter club-oa-web build` | 通过（Nuxt SSR 产物 2.64 MB） |
 | 镜像构建 | `docker build -f services/auth/Dockerfile .`、`docker build -f apps/web/Dockerfile .` | 均通过（根上下文） |
 | 编排校验 | `docker compose config`（生产 + 测试两套） | 通过 |
 
-> 覆盖率说明：合并后整仓函数覆盖率 77.22%，低于需求 19.3 的「函数 ≥ 80%」目标；CI 仍沿用原有的
-> **行覆盖率 ≥ 80%** 卡口（与原各服务一致）。补齐函数覆盖率（主要是 `services/task` 的 routes/repo）
-> 作为后续独立任务，达标后再把 `--fail-under-functions 80` 加入 CI。
+> 覆盖率口径：排除 `src/main.rs`（启动装配）与 `src/migration*`（迁移的 `down()` 不会在启动流程中执行），
+> 与需求 19.3 / 架构 15.3 的排除项一致；S3 后端集成测试在 CI 中由 MinIO 服务提供，因此 `storage/s3.rs` 计入覆盖率。
 
 ## 5. 后续操作建议
 
