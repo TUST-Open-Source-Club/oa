@@ -347,6 +347,7 @@ apps/app/
 ### 11.2 发布
 
 - CI：lint → test（含覆盖率门禁）→ 构建多阶段镜像 → registry → `docker compose pull && up -d`。
+- 镜像构建上下文固定为**仓库根目录**：`docker build -f services/<svc>/Dockerfile .`（Rust 需要根 `Cargo.lock` 与 `libs/`，Web 需要 `packages/`）；compose 已按此配置 `context` + `dockerfile`。
 - 迁移随服务启动执行；破坏性变更附备份步骤。
 - 客户端：CI 构建桌面三平台 + Android AAB/APK + iOS 归档；桌面 Tauri Updater（nginx 静态清单）。
 
@@ -358,29 +359,36 @@ apps/app/
 
 ---
 
-## 12. 仓库与目录结构（微服务 + 子模块）
+## 12. 仓库与目录结构（monorepo）
 
-主仓库只含文档与部署编排；业务代码在 12 个独立组件仓库中，通过 `.gitmodules` 挂载：
+单仓库承载全部代码：Rust 用根 **Cargo workspace** 管 `libs` + `services`，前端用根 **pnpm workspace** 管 `apps` + `packages`；
+部署边界不变——每服务仍是独立容器、独立 schema，服务之间只通过 API 与事件通信。
 
 ```
-club-oa/                        # 主仓库
-├── libs/                       # [子模块] club-oa-libs（Cargo workspace：common/auth-sdk/storage/bus）
-├── services/                   # [子模块] 每服务一个仓库 + 一个容器 + 一个 schema
-│   ├── auth/                   #   club-oa-auth      独立 Cargo 工程 + sea-orm-migration
+club-oa/                        # 单仓库根（Cargo workspace + pnpm workspace）
+├── Cargo.toml                  # Rust 工作区：成员 = libs/crates/* + services/*
+├── Cargo.lock                  # 全仓库唯一 Rust 锁文件
+├── package.json                # 前端工作区根（统一脚本入口）
+├── pnpm-workspace.yaml         # 前端工作区：apps/web、apps/app/electron、packages/*
+├── pnpm-lock.yaml              # 全仓库唯一前端锁文件
+├── libs/                       # 共享 Rust 库（Cargo workspace 成员）
+│   └── crates/{common,auth-sdk,storage,bus}/
+├── services/                   # 每服务一个 crate + 一个容器 + 一个 schema
+│   ├── auth/                   #   auth-service      :8081
 │   ├── im/ task/ doc/ meeting/ event/ drive/ notify/
-├── apps/web/                   # [子模块] club-oa-web（Nuxt 3）
-├── apps/app/                   # [子模块] club-oa-app（Tauri v2，五平台）
-├── packages/                   # [子模块] club-oa-fe-libs（ui/core/config）
+├── apps/web/                   # Nuxt 3 门户 + BFF
+├── apps/app/                   # 客户端壳：electron / android-shell / harmony-shell
+├── packages/                   # 前端共享库（@club-oa/ui、@club-oa/core）
 ├── deploy/                     # docker-compose / nginx / mail / postgres / onlyoffice
-├── scripts/                    # set-submodule-remotes.sh 等
-└── docs/                       # 需求 / 架构 / 设计系统 / api
+├── scripts/                    # test-env.sh（本地测试依赖）、check.sh（质量门禁）
+└── docs/                       # 需求 / 架构 / 迁移记录 / api
 ```
 
-服务仓库的标准结构（以 auth 为例）：
+服务目录的标准结构（以 auth 为例）：
 
 ```
-club-oa-auth/
-├── Cargo.toml                  # 单包工程；依赖 libs/crates/*（开发期 path，发布后 git tag）
+services/auth/
+├── Cargo.toml                  # workspace 成员；共享库与第三方依赖用 { workspace = true } 继承
 ├── src/
 │   ├── main.rs                 # 启动装配：配置 → DB → 迁移 → 路由 → 优雅退出
 │   ├── config.rs               # 环境变量配置（可单测）
@@ -391,11 +399,25 @@ club-oa-auth/
 │   ├── routes/                 # HTTP 处理器
 │   └── services/               # 领域逻辑（纯函数优先，便于单测）
 ├── tests/                      # 集成测试（每测试独立 schema + Migrator::up）
-├── Dockerfile
-└── .github/workflows/ci.yml    # lint / test / 覆盖率 ≥ 80% / 镜像
+└── Dockerfile                  # 构建上下文 = 仓库根目录
 ```
 
 依赖流向：`service → libs（auth-sdk/common/storage/bus）`；服务之间禁止代码级依赖。
+
+### 12.1 常用命令（单仓库）
+
+| 目的 | 命令 |
+| --- | --- |
+| 整仓编译 / 测试 | `cargo check --workspace` / `cargo test --workspace` |
+| 单个服务 | `cargo run -p auth-service`、`cargo test -p auth-service` |
+| 覆盖率门禁 | `cargo llvm-cov --workspace --fail-under-lines 80 --ignore-filename-regex 'src/main.rs'` |
+| 前端依赖 | `pnpm install`（根目录一次，单 `pnpm-lock.yaml`） |
+| 前端开发 / 构建 | `pnpm --filter club-oa-web dev` / `pnpm --filter club-oa-web build` |
+| 镜像构建 | `docker build -f services/auth/Dockerfile -t club-oa/auth:local .` |
+| 质量门禁 | `scripts/check.sh`（fmt + clippy + test + 覆盖率 + 前端 typecheck/test） |
+
+> 旧版「主仓库 + 12 个组件仓库 + git submodule」模型已废弃：`.gitmodules` 与嵌套子模块全部移除，
+> 组件历史与快照 SHA 见 `docs/migration-monorepo.md`。
 
 ---
 
@@ -414,7 +436,7 @@ club-oa-auth/
 
 | ADR | 决策 | 影响 |
 | --- | --- | --- |
-| ADR-001 | 微服务 + 多仓库：每服务一个仓库/容器/schema，主仓库用 git submodule 挂载 | 独立开发发布、故障隔离；代价是版本对齐与联调成本 |
+| ADR-001 | 微服务 + 单仓库（monorepo）：每服务一个 crate/容器/schema，代码同仓、部署独立 | 部署边界与故障隔离不变；依赖与版本单点对齐，消除子模块指针漂移；代价是仓库变大、CI 需按作业拆分 |
 | ADR-002 | 每服务独立 schema + 独立角色 | 边界清晰，可平滑拆库 |
 | ADR-003 | BFF（Web）+ 直连（客户端）双模式 | 安全与跨端兼顾 |
 | ADR-004 | Redis Streams 事件总线 + outbox | 不引入 MQ，至少一次投递 |
@@ -453,7 +475,7 @@ club-oa-auth/
 ### 15.3 覆盖率门禁
 
 - 指标：行 / 语句 / 函数覆盖率 ≥ 80%，分支覆盖率 ≥ 70%。
-- Rust：`cargo llvm-cov --workspace --all-features --fail-under-lines 80`（工具通过 `cargo install cargo-llvm-cov` 或 CI action 安装）。
+- Rust：`cargo llvm-cov --workspace --fail-under-lines 80 --ignore-filename-regex 'src/main.rs'`（整仓一次统计；工具通过 `cargo install cargo-llvm-cov` 或 CI action 安装）。
 - 前端：Vitest `coverage.thresholds` 配置 lines/statements/functions = 80，branches = 70，未达标直接失败。
 - 排除项：`migrations/**`、生成的 SDK（`packages/core/sdk`）、纯样式文件、`main.rs` 启动装配——仅允许在覆盖率配置中显式排除，任何新增排除项需在 PR 说明理由。
 - CI 报告（lcov + HTML）作为构建产物上传归档。

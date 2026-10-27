@@ -43,6 +43,7 @@
 | v0.10 | 2026-09-13 | Q17 ~ Q21 全部按建议确认（Android 原生壳、厂商资质申请、FCM 仅海外兜底、iOS PWA 限制接受、macOS 公证/Windows 暂不签名） |
 | v0.11 | 2026-09-13 | 新增 HarmonyOS NEXT 客户端：PWA 原生壳（ArkTS + ArkWeb + 华为 Push Kit，FCM 不可用直接降级 ntfy） |
 | v0.12 | 2026-09-13 | 所有客户端支持服务器地址配置与切换（不硬编码 Base URL）；Web 同源默认 |
+| v0.13 | 2026-10-27 | 仓库结构改为单仓库 monorepo：合并 12 个组件仓库（快照导入），Rust 单 Cargo workspace + 前端单 pnpm workspace，移除 git submodule；镜像构建上下文改为仓库根目录 |
 
 ---
 
@@ -188,45 +189,48 @@ flowchart TB
 | 可观测性 | tracing + OpenTelemetry（可选接入 Loki/Grafana） | 结构化日志到 stdout |
 | 测试 | Rust: cargo test + testcontainers；前端: Vitest；E2E: Playwright | CI 全量执行 |
 
-### 2.4 仓库结构（微服务 + 多仓库 + 子模块）
+### 2.4 仓库结构（微服务 + 单仓库 monorepo）
 
 **微服务原则（已确认，强制执行）**：
 
-- 每个后端服务 = 一个 Git 仓库 = 一个容器 = 一个数据库 schema，独立构建、独立发布、独立扩缩容。
+- 每个后端服务 = 一个 crate = 一个容器 = 一个数据库 schema，独立构建、独立部署、独立扩缩容。
 - 服务之间只通过 HTTP API 与事件总线通信；**禁止**共享进程、共享数据库表、跨服务查库。
-- 共享代码只存在于库仓库（`libs` / `packages`）中，且必须是纯库（无运行时状态）。
+- 共享代码只存在于 `libs/`（Rust）与 `packages/`（前端）中，且必须是纯库（无运行时状态）。
 
-主仓库（club-oa）只存放文档、部署编排与子模块引用，不包含业务代码：
+自 v0.13 起，全部代码在**单仓库**中维护（原 12 个组件仓库 + git submodule 已合并，迁移记录见 `docs/migration-monorepo.md`）：
 
 ```
-club-oa/                      # 主仓库：docs + deploy + scripts + 子模块
-├── libs/                     # 子模块 club-oa-libs：共享 Rust 库
+club-oa/                      # 单仓库：代码 + 文档 + 部署编排
+├── Cargo.toml                # Rust 工作区：成员 = libs/crates/* + services/*
+├── Cargo.lock                # 全仓唯一 Rust 锁文件
+├── libs/                     # 共享 Rust 库
 │   └── crates/{common,auth-sdk,storage,bus}/
-├── services/                 # 每个子目录 = 一个独立服务仓库 + 一个容器
-│   ├── auth/                 # club-oa-auth（:8081，schema auth）
-│   ├── im/                   # club-oa-im（:8082，schema im）
-│   ├── task/                 # club-oa-task（:8083，schema task）
-│   ├── doc/                  # club-oa-doc（:8084，schema doc）
-│   ├── meeting/              # club-oa-meeting（:8085，schema meeting，条件模块）
-│   ├── event/                # club-oa-event（:8086，schema event）
-│   ├── drive/                # club-oa-drive（:8087，schema drive）
-│   └── notify/               # club-oa-notify（:8088，schema notify）
+├── services/                 # 每个子目录 = 一个服务 crate + 一个容器
+│   ├── auth/                 # auth-service（:8081，schema auth）
+│   ├── im/                   # im-service（:8082，schema im）
+│   ├── task/                 # task-service（:8083，schema task）
+│   ├── doc/                  # doc-service（:8084，schema doc）
+│   ├── meeting/              # 会议服务（:8085，schema meeting，条件模块，待实现）
+│   ├── event/                # event-service（:8086，schema event）
+│   ├── drive/                # drive-service（:8087，schema drive）
+│   └── notify/               # notify-service（:8088，schema notify）
 ├── apps/
-│   ├── web/                  # 子模块 club-oa-web（Nuxt 3 门户 + BFF）
-│   ├── pwa/                  # iOS PWA（与 web 共享代码）
-│   ├── android-shell/        # Android 原生壳（WebView + 厂商推送）
-│   ├── harmony-shell/        # HarmonyOS NEXT 壳（ArkTS + ArkWeb + Push Kit）
-│   └── electron/             # 桌面端 Electron 壳
-├── packages/                 # 子模块 club-oa-fe-libs（ui / core / config）
+│   ├── web/                  # Web 门户 + BFF（Nuxt 3）
+│   └── app/                  # 客户端壳：electron / android-shell / harmony-shell
+├── packages/                 # 前端共享库（@club-oa/ui、@club-oa/core）
+├── package.json              # 前端工作区根（pnpm workspace 脚本入口）
+├── pnpm-workspace.yaml       # 前端工作区：apps/web、apps/app/electron、packages/*
+├── pnpm-lock.yaml            # 全仓唯一前端锁文件
 ├── deploy/                   # docker-compose / nginx / mail / postgres 初始化
-├── scripts/                  # 子模块远程地址切换等脚本
-└── docs/                     # requirements / architecture / design-system / api
+├── scripts/                  # test-env.sh（测试依赖）、check.sh（质量门禁）
+└── docs/                     # requirements / architecture / migration / api
 ```
 
-- 组件仓库清单（12 个）：club-oa-libs、club-oa-auth、club-oa-im、club-oa-task、club-oa-doc、club-oa-meeting、club-oa-event、club-oa-drive、club-oa-notify、club-oa-web、club-oa-app、club-oa-fe-libs。
-- 依赖方式：开发期服务仓库通过主仓库子模块布局使用相对路径依赖 (`../../libs/crates/*`)；远程托管后切换为 git tag 依赖并锁定版本。
-- 每个服务仓库必须自带：Cargo 工程（SeaORM + sea-orm-migration）、Dockerfile、健康检查、CI（含覆盖率门禁）、README。
-- 主仓库通过 `.gitmodules` 固定各组件版本；升级组件 = 更新子模块指针。
+- 依赖方式：服务通过根 `[workspace.dependencies]` 引用共享库（`club-common` 等），第三方依赖版本与特性单点声明；
+  前端通过 `workspace:*` 引用 `@club-oa/ui`、`@club-oa/core`。
+- 每个服务必须自带：Cargo 工程（SeaORM + sea-orm-migration）、Dockerfile（以仓库根目录为构建上下文）、健康检查、README。
+- 版本固定：全仓共用一份 `Cargo.lock` 与 `pnpm-lock.yaml`；升级依赖 = 改根清单并一次提交，所有服务同时生效。
+- 发布：CI 拆分为 Rust 与前端两个作业；镜像构建 `docker build -f services/<svc>/Dockerfile .`；回归与版本发布在同一处完成。
 
 ### 2.5 关键架构决策
 
