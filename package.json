@@ -13,8 +13,7 @@
     "build": "pnpm --filter club-oa-web build",
     "preview": "pnpm --filter club-oa-web preview",
     "test": "pnpm -r test",
-    "typecheck": "pnpm --filter './packages/*' typecheck",
-    "typecheck:web": "pnpm --filter club-oa-web typecheck",
+    "typecheck": "pnpm -r typecheck",
     "dev:electron": "pnpm --filter club-oa-electron dev",
     "dist:electron": "pnpm --filter club-oa-electron dist"
   }
