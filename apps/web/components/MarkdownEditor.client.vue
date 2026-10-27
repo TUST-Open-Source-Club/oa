@@ -59,7 +59,7 @@ onMounted(async () => {
       .use(commonmark)
       .use(listener)
       .create()
-    editor.value = instance as typeof editor.value
+    editor.value = instance as unknown as typeof editor.value
     ready.value = true
   } catch (error) {
     console.error('Milkdown 初始化失败', error)

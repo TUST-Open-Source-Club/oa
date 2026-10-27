@@ -2,22 +2,7 @@
 /** 报名表单设计器：字段增删/排序、类型、必填、选项编辑（对接后端 JSONB schema）。 */
 import { Input } from '@club-oa/ui'
 
-/** 选项。 */
-interface FieldOption { label: string; value: string }
-/** 字段。 */
-export interface FormFieldItem {
-  key: string
-  type: string
-  label: string
-  required?: boolean
-  maxLength?: number
-  options?: FieldOption[]
-}
-/** Schema。 */
-export interface FormSchema {
-  version?: number
-  fields: FormFieldItem[]
-}
+import type { FieldOption, FormFieldItem, FormSchema } from '~/utils/form-schema'
 
 const props = defineProps<{ modelValue: FormSchema }>()
 const emit = defineEmits<{ 'update:modelValue': [value: FormSchema] }>()
@@ -69,6 +54,7 @@ function moveField(index: number, offset: number) {
   if (target < 0 || target >= fields.value.length) return
   const next = [...fields.value]
   const [item] = next.splice(index, 1)
+  if (!item) return
   next.splice(target, 0, item)
   update(next)
 }
@@ -76,6 +62,7 @@ function moveField(index: number, offset: number) {
 /** 切换类型时补/清选项。 */
 function changeType(index: number, type: string) {
   const field = fields.value[index]
+  if (!field) return
   if (optionTypes.includes(type)) {
     patchField(index, {
       type,
@@ -89,16 +76,19 @@ function changeType(index: number, type: string) {
 /** 选项增删改。 */
 function addOption(index: number) {
   const field = fields.value[index]
+  if (!field) return
   const options = field.options ?? []
   patchField(index, { options: [...options, { label: `选项 ${options.length + 1}`, value: `option_${options.length + 1}` }] })
 }
 function patchOption(index: number, optionIndex: number, patch: Partial<FieldOption>) {
   const field = fields.value[index]
+  if (!field) return
   const options = (field.options ?? []).map((option, i) => (i === optionIndex ? { ...option, ...patch } : option))
   patchField(index, { options })
 }
 function removeOption(index: number, optionIndex: number) {
   const field = fields.value[index]
+  if (!field) return
   patchField(index, { options: (field.options ?? []).filter((_, i) => i !== optionIndex) })
 }
 </script>

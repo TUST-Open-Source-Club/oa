@@ -61,7 +61,8 @@ function api<T>(path: string, options: Record<string, unknown> = {}) {
 /** 加载空间（保持当前选择）。 */
 async function loadSpaces() {
   spaces.value = await api<SpaceItem[]>('spaces')
-  if (spaces.value.length > 0 && !spaceId.value) spaceId.value = spaces.value[0].id
+  const first = spaces.value[0]
+  if (first && !spaceId.value) spaceId.value = first.id
   await loadTree()
 }
 
@@ -227,7 +228,10 @@ const outline = computed(() => {
   const items: Array<{ level: number; text: string }> = []
   for (const line of draft.value.split('\n')) {
     const match = /^(#{1,4})\s+(.+)$/.exec(line.trim())
-    if (match) items.push({ level: match[1].length, text: match[2].slice(0, 60) })
+    if (match) {
+      const [, hashes, text] = match
+      if (hashes && text) items.push({ level: hashes.length, text: text.slice(0, 60) })
+    }
   }
   return items
 })

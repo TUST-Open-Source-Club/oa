@@ -16,6 +16,12 @@ interface NodeItem {
   mime: string | null
   createdAt: string
 }
+/** 文件操作记录条目（变更日志）。 */
+interface ChangeItem {
+  id: string
+  action: string
+  createdAt: string
+}
 
 const auth = useAuthStore()
 
@@ -39,7 +45,7 @@ const menu = reactive<{ open: boolean; x: number; y: number; node: NodeItem | nu
   node: null,
 })
 const changesOpen = ref(false)
-const changes = ref<Array<{ id: string; action: string; createdAt: string }>>([])
+const changes = ref<ChangeItem[]>([])
 const changesNode = ref<NodeItem | null>(null)
 
 const createSpaceOpen = ref(false)
@@ -75,7 +81,8 @@ function api<T>(path: string, options: Record<string, unknown> = {}) {
 /** 加载空间。 */
 async function loadSpaces() {
   spaces.value = await api<SpaceItem[]>('spaces')
-  if (spaces.value.length > 0 && !spaceId.value) spaceId.value = spaces.value[0].id
+  const first = spaces.value[0]
+  if (first && !spaceId.value) spaceId.value = first.id
 }
 
 /** 加载当前目录 / 回收站。 */
@@ -236,7 +243,7 @@ async function restoreNode(node: NodeItem) {
 async function openChanges(node: NodeItem) {
   changesNode.value = node
   try {
-    changes.value = await api(`spaces/${spaceId.value}/nodes/${node.id}/changes`)
+    changes.value = await api<ChangeItem[]>(`spaces/${spaceId.value}/nodes/${node.id}/changes`)
   } catch {
     changes.value = []
   }
@@ -244,10 +251,12 @@ async function openChanges(node: NodeItem) {
 }
 
 /** 撤销删除。 */
-async function undoChange(change: { id: string }) {
+async function undoChange(change: ChangeItem) {
   await api(`changes/${change.id}/undo`, { method: 'POST' })
   if (changesNode.value) {
-    changes.value = await api(`spaces/${spaceId.value}/nodes/${changesNode.value.id}/changes`).catch(() => [])
+    changes.value = await api<ChangeItem[]>(
+      `spaces/${spaceId.value}/nodes/${changesNode.value.id}/changes`,
+    ).catch(() => [])
   }
   await loadNodes()
 }

@@ -113,8 +113,9 @@ async function loadConversations() {
       ...(item.lastMessage?.senderId ? [item.lastMessage.senderId] : []),
     ]),
   )
-  if (!activeId.value && conversations.value.length > 0) {
-    await openConversation(conversations.value[0].id)
+  const first = conversations.value[0]
+  if (!activeId.value && first) {
+    await openConversation(first.id)
   }
 }
 

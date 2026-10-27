@@ -2,6 +2,8 @@
 /** 活动管理页：活动 CRUD/开关、名单审核与签到、统计、Excel 导出。 */
 import { Button, Card, Input } from '@club-oa/ui'
 
+import type { FormSchema } from '~/utils/form-schema'
+
 interface EventItem {
   id: string
   slug: string
@@ -36,7 +38,7 @@ const qrDataUrl = ref('')
 const formOpen = ref(false)
 const changesOpen = ref(false)
 const changes = ref<Array<{ id: string; action: string; createdAt: string }>>([])
-const formSchema = ref<{ version?: number; fields: Array<Record<string, unknown>> }>({ fields: [] })
+const formSchema = ref<FormSchema>({ fields: [] })
 const formSaving = ref(false)
 
 /** 报名公开链接。 */
@@ -77,11 +79,8 @@ async function openFormDesigner() {
   if (!selectedId.value) return
   errorMessage.value = ''
   try {
-    const response = await api<{ version?: number; schema?: { fields: unknown[] } } & { fields?: unknown[] }>(
-      `events/${selectedId.value}/form`,
-    )
-    const schema = (response.schema ?? response) as { version?: number; fields: Array<Record<string, unknown>> }
-    formSchema.value = { version: schema.version, fields: schema.fields ?? [] }
+    const response = await api<unknown>(`events/${selectedId.value}/form`)
+    formSchema.value = toFormSchema(response)
     formOpen.value = true
   } catch (error) {
     message.value = apiErrorMessage(error)
@@ -123,7 +122,8 @@ function api<T>(path: string, options: Record<string, unknown> = {}) {
 /** 加载活动列表。 */
 async function loadEvents() {
   events.value = await api<EventItem[]>('events')
-  if (events.value.length > 0 && !selectedId.value) selectedId.value = events.value[0].id
+  const first = events.value[0]
+  if (first && !selectedId.value) selectedId.value = first.id
   if (selectedId.value) await loadDetail()
 }
 

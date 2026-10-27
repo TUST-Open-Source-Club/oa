@@ -109,7 +109,8 @@ async function resolveUsers(ids: string[]) {
 /** 加载项目列表。 */
 async function loadProjects() {
   projects.value = await api<ProjectItem[]>('projects')
-  if (projects.value.length > 0 && !projectId.value) projectId.value = projects.value[0].id
+  const first = projects.value[0]
+  if (first && !projectId.value) projectId.value = first.id
   if (projectId.value) await loadBoard()
 }
 

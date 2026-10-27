@@ -9,7 +9,7 @@ export function problemOf(error: unknown): ProblemDetails | null {
   if (!data || typeof data !== 'object') return null
   const nested = (data as { data?: unknown }).data
   if (nested && typeof nested === 'object') return nested as ProblemDetails
-  if ('detail' in data || 'code' in data) return data as ProblemDetails
+  if ('detail' in data || 'code' in data || 'title' in data) return data as ProblemDetails
   return null
 }
 

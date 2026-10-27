@@ -32,7 +32,11 @@ const activeIndex = ref(-1)
 const selectedIds = computed<string[]>(() =>
   Array.isArray(props.modelValue) ? props.modelValue : props.modelValue ? [props.modelValue] : [],
 )
-const selected = computed(() => selectedIds.value.map((id) => directory.value[id]).filter(Boolean))
+const selected = computed(() =>
+  selectedIds.value.map((id) => directory.value[id]).filter((user): user is UserItem => Boolean(user)),
+)
+/** 单选模式下当前选中用户（模板用，避免 `selected[0]` 可能为空）。 */
+const single = computed(() => selected.value[0] ?? null)
 
 let timer: ReturnType<typeof setTimeout> | undefined
 watch(keyword, (value) => {
@@ -126,6 +130,13 @@ function remove(id: string) {
     emit('update:modelValue', null)
   }
 }
+
+/** 失焦后延时收起下拉（留出点击选项的时间）。 */
+function closeSoon() {
+  window.setTimeout(() => {
+    focused.value = false
+  }, 150)
+}
 </script>
 
 <template>
@@ -150,7 +161,7 @@ function remove(id: string) {
       v-model="keyword"
       :placeholder="placeholder"
       @focusin="focused = true"
-      @focusout="setTimeout(() => (focused = false), 150)"
+      @focusout="closeSoon"
       @keydown="onKeydown"
     />
     <div
@@ -182,12 +193,12 @@ function remove(id: string) {
       </button>
     </div>
     <div
-      v-if="!multiple && selected.length"
+      v-if="!multiple && single"
       class="mt-1.5 flex items-center gap-1.5 text-xs text-neutral-500"
     >
-      <UserAvatar :name="selected[0].nickname" :seed="selected[0].id" size="sm" />
-      {{ selected[0].nickname }}
-      <button class="text-neutral-400 hover:text-danger-500" @click="remove(selected[0].id)">清除</button>
+      <UserAvatar :name="single.nickname" :seed="single.id" size="sm" />
+      {{ single.nickname }}
+      <button class="text-neutral-400 hover:text-danger-500" @click="remove(single.id)">清除</button>
     </div>
   </div>
 </template>

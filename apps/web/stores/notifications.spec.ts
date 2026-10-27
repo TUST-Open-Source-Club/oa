@@ -77,8 +77,8 @@ describe('useNotificationsStore', () => {
     store.items = [item('n1'), item('n2')]
     store.unreadCount = 2
     await store.markRead('n1')
-    expect(store.items[0].read).toBe(true)
-    expect(store.items[1].read).toBe(false)
+    expect(store.items[0]!.read).toBe(true)
+    expect(store.items[1]!.read).toBe(false)
     expect(store.unreadCount).toBe(1)
   })
 

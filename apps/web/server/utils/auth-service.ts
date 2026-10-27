@@ -19,7 +19,13 @@ export async function callAuthService<T>(
 ): Promise<T> {
   const base = useRuntimeConfig(event).authServiceUrl
   try {
-    return await $fetch<T>(`${base}${path}`, { method: 'POST', body })
+    // Nitro 的 $fetch 返回类型是内部 TypedInternalResponse（与泛型参数不直接对齐），
+    // 这里在边界处收敛一次，调用方拿到的就是声明的 T。
+    const response = await $fetch(`${base}${path}`, {
+      method: 'POST',
+      body: body as Record<string, unknown> | undefined,
+    })
+    return response as T
   } catch (error: unknown) {
     const fetchError = error as {
       response?: { status?: number }
