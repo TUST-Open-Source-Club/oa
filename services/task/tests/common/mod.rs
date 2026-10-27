@@ -39,6 +39,11 @@ pub struct TestApp {
 
 /// 启动测试应用。
 pub async fn spawn() -> TestApp {
+    spawn_with_env(HashMap::new()).await
+}
+
+/// 启动测试应用并附加/覆盖配置（如 `TASK_STORAGE_PATH`）。
+pub async fn spawn_with_env(extra_env: HashMap<String, String>) -> TestApp {
     let url = test_database_url();
     let schema = format!("test_{}", Uuid::now_v7().simple());
     let database = db::connect_with_schema(&url, &schema)
@@ -63,6 +68,7 @@ pub async fn spawn() -> TestApp {
     let mut env: HashMap<String, String> = HashMap::new();
     env.insert("DATABASE_URL".to_string(), url);
     env.insert("AUTH_ISSUER".to_string(), "https://oa.test".to_string());
+    env.extend(extra_env);
     let config = Config::from_map(env).expect("config");
 
     let state = SharedState::new(AppState {
