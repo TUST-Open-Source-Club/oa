@@ -1,0 +1,17 @@
+# Docker 构建上下文中的忽略项（Rust 服务与 Web 均以仓库根目录为 context）
+.git
+.repos
+.cargo-home
+.pnpm-store
+docs
+deploy
+**/node_modules
+**/target
+**/.nuxt
+**/.output
+**/coverage
+**/dist
+**/release
+**/*.log
+**/.env
+**/.env.*

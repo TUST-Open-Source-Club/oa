@@ -6,9 +6,12 @@
 
 ```bash
 cd deploy/test
-docker compose --profile seed up --build     # 首次构建较久（8 个 Rust 服务 + Nuxt）
+docker compose --profile seed up --build     # 首次构建较久（7 个 Rust 服务 + Nuxt）
 docker compose logs -f seed                  # 查看种子数据写入结果
 ```
+
+> 构建上下文是仓库根目录（compose 已配置 `context: ../..` + `dockerfile`），因此需要在本仓库任意位置执行，
+> 但 compose 文件必须在 `deploy/test/` 下解析（`nginx.conf`、`seed.sh` 等相对路径）。
 
 - 门户：http://localhost:8088
 - 账号：`admin@club.test / Admin12345!`、`member1@club.test / Member12345!`、`member2@club.test / Member12345!`

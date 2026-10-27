@@ -1,0 +1,90 @@
+name: CI
+
+# 单仓库 CI：Rust 工作区（fmt / clippy / test / 覆盖率）+ 前端工作区（typecheck / test / build）
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+
+jobs:
+  rust:
+    name: Rust（fmt / clippy / test / 覆盖率）
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: club_oa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/club_oa
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/club_oa
+      REDIS_TEST_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: 格式检查
+        run: cargo fmt --all -- --check
+      - name: Clippy（-D warnings）
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: 测试（整仓）
+        run: cargo test --workspace
+      - name: 安装覆盖率工具
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: 覆盖率（行 ≥ 80%，排除启动装配）
+        run: |
+          cargo llvm-cov --workspace --fail-under-lines 80 \
+            --ignore-filename-regex 'src/main.rs' --lcov --output-path lcov.info
+      - name: 上传覆盖率报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-coverage
+          path: lcov.info
+
+  web:
+    name: 前端（typecheck / test / build）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: 安装依赖（根 workspace 单锁文件）
+        run: pnpm install --frozen-lockfile
+      - name: 类型检查（packages/*；apps/web 的存量类型错误待清理后纳入）
+        run: pnpm --filter './packages/*' typecheck
+      - name: 单测 + 覆盖率（阈值在 vitest 配置中强制）
+        run: pnpm -r test
+      - name: 构建 Web 门户
+        run: pnpm --filter club-oa-web build

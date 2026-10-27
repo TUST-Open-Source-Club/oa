@@ -55,7 +55,8 @@ services:
   auth:
     <<: *service-common
     build:
-      context: ../services/auth
+      context: ..
+      dockerfile: services/auth/Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-club_oa}
       AUTH_ISSUER: ${PUBLIC_BASE_URL:-http://localhost}
@@ -80,7 +81,8 @@ services:
   notify:
     <<: *service-common
     build:
-      context: ../services/notify
+      context: ..
+      dockerfile: services/notify/Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-club_oa}
       AUTH_ISSUER: ${PUBLIC_BASE_URL:-http://localhost}
@@ -107,7 +109,8 @@ services:
   drive:
     <<: *service-common
     build:
-      context: ../services/drive
+      context: ..
+      dockerfile: services/drive/Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-club_oa}
       AUTH_ISSUER: ${PUBLIC_BASE_URL:-http://localhost}
@@ -139,7 +142,8 @@ services:
   doc:
     <<: *service-common
     build:
-      context: ../services/doc
+      context: ..
+      dockerfile: services/doc/Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-club_oa}
       AUTH_ISSUER: ${PUBLIC_BASE_URL:-http://localhost}
@@ -172,7 +176,8 @@ services:
     image: club-oa/web:${WEB_TAG:-local}
     restart: unless-stopped
     build:
-      context: ../apps/web
+      context: ..
+      dockerfile: apps/web/Dockerfile
     environment:
       NUXT_AUTH_SERVICE_URL: http://auth:8081
       NUXT_NOTIFY_SERVICE_URL: http://notify:8088

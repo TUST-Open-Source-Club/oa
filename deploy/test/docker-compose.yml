@@ -62,7 +62,7 @@ services:
 
   auth:
     <<: *app-common
-    build: { context: ../../services/auth }
+    build: { context: ../.., dockerfile: services/auth/Dockerfile }
     environment:
       <<: *db-env
       AUTH_ISSUER: http://auth:8081
@@ -86,7 +86,7 @@ services:
 
   im:
     <<: *app-common
-    build: { context: ../../services/im }
+    build: { context: ../.., dockerfile: services/im/Dockerfile }
     environment:
       <<: *db-env
       AUTH_ISSUER: http://auth:8081
@@ -105,7 +105,7 @@ services:
 
   task:
     <<: *app-common
-    build: { context: ../../services/task }
+    build: { context: ../.., dockerfile: services/task/Dockerfile }
     environment:
       <<: *db-env
       AUTH_ISSUER: http://auth:8081
@@ -126,7 +126,7 @@ services:
 
   doc:
     <<: *app-common
-    build: { context: ../../services/doc }
+    build: { context: ../.., dockerfile: services/doc/Dockerfile }
     environment:
       <<: *db-env
       AUTH_ISSUER: http://auth:8081
@@ -142,7 +142,7 @@ services:
 
   event:
     <<: *app-common
-    build: { context: ../../services/event }
+    build: { context: ../.., dockerfile: services/event/Dockerfile }
     environment:
       <<: *db-env
       AUTH_ISSUER: http://auth:8081
@@ -161,7 +161,7 @@ services:
 
   drive:
     <<: *app-common
-    build: { context: ../../services/drive }
+    build: { context: ../.., dockerfile: services/drive/Dockerfile }
     environment:
       <<: *db-env
       AUTH_ISSUER: http://auth:8081
@@ -186,7 +186,7 @@ services:
 
   notify:
     <<: *app-common
-    build: { context: ../../services/notify }
+    build: { context: ../.., dockerfile: services/notify/Dockerfile }
     environment:
       <<: *db-env
       AUTH_ISSUER: http://auth:8081
@@ -209,7 +209,7 @@ services:
 
   web:
     <<: *app-common
-    build: { context: ../../apps/web }
+    build: { context: ../.., dockerfile: apps/web/Dockerfile }
     environment:
       # 统一经网关：nginx 用 Docker DNS 动态解析，服务重建换 IP 不影响 BFF
       NUXT_AUTH_SERVICE_URL: http://gateway
