@@ -1,0 +1,18 @@
+appId: com.cluboahq.app
+productName: 社团OA
+directories:
+  output: release
+files:
+  - dist/**/*
+  - package.json
+win:
+  target: [nsis]
+mac:
+  target: [dmg]
+  category: public.app-category.productivity
+linux:
+  target: [AppImage, deb]
+  category: Office
+publish:
+  provider: generic
+  url: https://oa.example.com/downloads/desktop

@@ -1,0 +1,34 @@
+{
+  "name": "club-oa-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "typecheck": "nuxt typecheck"
+  },
+  "dependencies": {
+    "@club-oa/core": "workspace:*",
+    "@club-oa/ui": "workspace:*",
+    "@milkdown/kit": "^7.22.1",
+    "@pinia/nuxt": "^1.0.2",
+    "@tailwindcss/vite": "^4.3.3",
+    "nuxt": "^4.5.2",
+    "ofetch": "^1.5.1",
+    "pinia": "^4.0.3",
+    "qrcode": "^1.5.4",
+    "tailwindcss": "^4.3.3",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6",
+    "@vitest/coverage-v8": "^5.0.0",
+    "typescript": "5.9.3",
+    "vitest": "^5.0.0",
+    "vue-tsc": "^3.3.11"
+  }
+}

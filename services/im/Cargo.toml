@@ -1,0 +1,38 @@
+[package]
+name = "im-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+axum = { workspace = true, features = ["ws"] }
+chrono.workspace = true
+club-auth-sdk.workspace = true
+club-bus.workspace = true
+club-common.workspace = true
+futures-util.workspace = true
+jsonwebtoken.workspace = true
+reqwest.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+rand_core.workspace = true
+rsa.workspace = true
+tokio-tungstenite = "0.30.0"
+tower.workspace = true

@@ -1,0 +1,87 @@
+# 社团 OA 单仓库 Rust 工作区
+#
+# - 成员：共享库 libs/crates/*、后端服务 services/*
+# - services/meeting 目前仅有占位 README（会议为条件模块），实现落地后再加入 members
+# - 第三方依赖版本与特性统一在此声明，成员用 `{ workspace = true }` 继承，避免版本漂移
+# - 全仓库共用根目录 Cargo.lock，不再有各服务独立 lockfile
+
+[workspace]
+resolver = "2"
+members = [
+  "libs/crates/common",
+  "libs/crates/auth-sdk",
+  "libs/crates/bus",
+  "libs/crates/storage",
+  "services/auth",
+  "services/im",
+  "services/task",
+  "services/doc",
+  "services/event",
+  "services/drive",
+  "services/notify",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[workspace.dependencies]
+# ---------- 仓库内共享库（path 依赖） ----------
+club-common = { version = "0.1.0", path = "libs/crates/common" }
+club-auth-sdk = { version = "0.1.0", path = "libs/crates/auth-sdk" }
+club-bus = { version = "0.1.0", path = "libs/crates/bus" }
+club-storage = { version = "0.1.0", path = "libs/crates/storage" }
+
+# ---------- 运行时与框架 ----------
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+axum = "0.8.9"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "net", "time", "sync"] }
+tower-http = { version = "0.7.1", features = ["trace", "cors"] }
+futures-util = "0.3.34"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
+
+# ---------- 数据与序列化 ----------
+sea-orm = { version = "2.0.2", features = ["runtime-tokio-rustls", "sqlx-postgres", "macros", "with-uuid", "with-chrono", "with-json"] }
+# 服务内嵌迁移（Migrator::up）不需要迁移 CLI，关掉默认 features 避免拖入 clap/dotenvy
+sea-orm-migration = { version = "2.0.2", default-features = false, features = ["runtime-tokio-rustls", "sqlx-postgres"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+uuid = { version = "1.26.1", features = ["v7", "serde"] }
+
+# ---------- 认证 / 加密 ----------
+argon2 = "0.6.0"
+base64 = "0.23.1"
+jsonwebtoken = "9"
+rand = "0.10.2"
+rand_core = { version = "0.6", features = ["getrandom"] }
+rsa = { version = "0.9.10", features = ["pem"] }
+sha2 = "0.11.0"
+hmac = "0.13.0"
+hex = "0.4.3"
+bytes = "1.12.1"
+
+# ---------- 日志与错误 ----------
+thiserror = "2.0.20"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+
+# ---------- 测试 ----------
+http-body-util = "0.1.5"
+tower = { version = "0.5.3", features = ["util"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+todo = "allow"
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+lto = "thin"
+strip = true

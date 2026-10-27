@@ -1,0 +1,9 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "社团 OA 主模块" },
+    { "name": "EntryAbility_desc", "value": "社团 OA" },
+    { "name": "app_name", "value": "社团 OA" },
+    { "name": "reason_camera", "value": "扫码签到与视频会议需要摄像头" },
+    { "name": "reason_mic", "value": "视频会议需要麦克风" }
+  ]
+}

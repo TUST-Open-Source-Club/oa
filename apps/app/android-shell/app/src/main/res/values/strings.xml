@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">社团 OA</string>
+    <string name="server_setup_title">配置服务器</string>
+    <string name="server_setup_hint">https://oa.example.com</string>
+    <string name="server_setup_save">连接</string>
+    <string name="server_setup_checking">正在校验服务器…</string>
+</resources>

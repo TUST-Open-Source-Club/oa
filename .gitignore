@@ -1,4 +1,4 @@
-# 本地组件仓库工作副本（子模块来源）
+# 迁移期的组件仓库缓存（历史 submodule 克隆，不再参与构建）
 .repos/
 
 # 开发产物
@@ -8,7 +8,16 @@ dist/
 .output/
 .nuxt/
 coverage/
+lcov.info
 data/
+release/
+*.tsbuildinfo
+pnpm-debug.log*
+
+# 包管理 / 构建缓存（pnpm 在每个工作区根建本地 store；cargo 缓存仅本地验证用）
+.pnpm-store/
+.cargo-home/
+.electron-cache/
 
 # 环境与密钥
 .env
@@ -22,3 +31,4 @@ data/
 .idea/
 .vscode/
 *.log
+.docker-config/

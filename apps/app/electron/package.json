@@ -1,0 +1,24 @@
+{
+  "name": "club-oa-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "社团 OA 桌面端（Electron 壳）",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc && electron .",
+    "dist": "tsc && electron-builder",
+    "dist:win": "tsc && electron-builder --win",
+    "dist:mac": "tsc && electron-builder --mac",
+    "dist:linux": "tsc && electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "license": "AGPL-3.0-or-later"
+}

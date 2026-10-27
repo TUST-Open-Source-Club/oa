@@ -1,0 +1,31 @@
+[package]
+name = "club-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+base64.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+hex.workspace = true
+hmac.workspace = true
+http = { version = "1.5.0", optional = true }
+object_store = { version = "0.14.1", features = ["aws"], optional = true }
+sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
+tracing.workspace = true
+
+[features]
+s3 = ["dep:object_store", "dep:http"]
+http = ["dep:http"]
+
+[dev-dependencies]
+reqwest.workspace = true
+uuid.workspace = true

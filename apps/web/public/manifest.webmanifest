@@ -1,0 +1,10 @@
+{
+  "name": "社团 OA",
+  "short_name": "社团OA",
+  "description": "社团办公自动化平台",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5"
+}

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'" />
+    <title>配置服务器</title>
+    <style>
+      body { font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f9fafb; }
+      .card { width: 420px; padding: 32px; border-radius: 12px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+      h1 { font-size: 20px; margin: 0 0 16px; }
+      input { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+      button { width: 100%; margin-top: 16px; padding: 10px; border: 0; border-radius: 8px; background: #4f46e5; color: #fff; font-size: 14px; cursor: pointer; }
+      button:disabled { opacity: .6; cursor: default; }
+      p { font-size: 12px; color: #6b7280; min-height: 16px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>配置服务器</h1>
+      <input id="server" placeholder="https://oa.example.com" />
+      <button id="connect">连接</button>
+      <p id="message"></p>
+    </div>
+    <script>
+      const input = document.getElementById('server')
+      const button = document.getElementById('connect')
+      const message = document.getElementById('message')
+      button.addEventListener('click', async () => {
+        button.disabled = true
+        message.textContent = '正在校验服务器…'
+        try {
+          const issuer = await window.clubOA.validate(input.value)
+          message.textContent = `已连接：${issuer}`
+          await window.clubOA.setServer(input.value)
+        } catch (error) {
+          message.textContent = `连接失败：${error.message ?? '未知错误'}`
+        } finally {
+          button.disabled = false
+        }
+      })
+    </script>
+  </body>
+</html>
