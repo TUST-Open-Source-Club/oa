@@ -561,3 +561,38 @@ pub async fn search_docs(
     }
     Ok(hits)
 }
+
+/// 写入文档媒体文件。
+pub async fn insert_file(
+    db: &DatabaseConnection,
+    uploader_id: Uuid,
+    name: &str,
+    mime: &str,
+    data: Vec<u8>,
+    now: DateTime<Utc>,
+) -> Result<crate::entity::doc_file::Model, AppError> {
+    use crate::entity::doc_file;
+    doc_file::ActiveModel {
+        id: Set(new_id()),
+        uploader_id: Set(uploader_id),
+        name: Set(name.to_string()),
+        mime: Set(mime.to_string()),
+        size: Set(data.len() as i32),
+        data: Set(data),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}
+
+/// 按 ID 读取文档媒体文件。
+pub async fn find_file(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> Result<Option<crate::entity::doc_file::Model>, AppError> {
+    crate::entity::doc_file::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}

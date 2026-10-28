@@ -95,7 +95,10 @@ async fn upload_then_download_image() {
     // 签名与文件 ID 不匹配
     let file_id = body["id"].as_str().unwrap();
     let swapped = url.replace(file_id, &Uuid::now_v7().to_string());
-    assert_eq!(get_raw(&app, &swapped).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        get_raw(&app, &swapped).await.status,
+        StatusCode::UNAUTHORIZED
+    );
 }
 
 #[tokio::test]
@@ -134,7 +137,14 @@ async fn upload_validates_auth_and_payload() {
     );
 
     let oversized = vec![0u8; doc_service::routes::MAX_FILE_BYTES + 1];
-    let too_big = upload(&app, &token, "big.bin", "application/octet-stream", &oversized).await;
+    let too_big = upload(
+        &app,
+        &token,
+        "big.bin",
+        "application/octet-stream",
+        &oversized,
+    )
+    .await;
     assert_eq!(
         too_big.expect(StatusCode::UNPROCESSABLE_ENTITY)["code"],
         "DOC_VALIDATION"
@@ -157,9 +167,9 @@ async fn download_rejects_bad_token() {
     let uploaded = upload(&app, &token, "x.png", "image/png", b"x").await;
     let body = uploaded.expect(StatusCode::CREATED);
     let url = body["url"].as_str().unwrap();
-    let missing = url.replace(
-        body["id"].as_str().unwrap(),
-        &Uuid::now_v7().to_string(),
+    let missing = url.replace(body["id"].as_str().unwrap(), &Uuid::now_v7().to_string());
+    assert_eq!(
+        get_raw(&app, &missing).await.status,
+        StatusCode::UNAUTHORIZED
     );
-    assert_eq!(get_raw(&app, &missing).await.status, StatusCode::UNAUTHORIZED);
 }

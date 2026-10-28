@@ -18,6 +18,7 @@ club-bus.workspace = true
 club-common.workspace = true
 sha2.workspace = true
 jsonwebtoken.workspace = true
+base64.workspace = true
 reqwest.workspace = true
 sea-orm.workspace = true
 sea-orm-migration.workspace = true

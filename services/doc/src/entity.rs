@@ -163,3 +163,36 @@ pub mod version {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// 文档媒体文件（图片/附件，≤5MB）。
+pub mod doc_file {
+    use sea_orm::entity::prelude::*;
+
+    /// 文件模型。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "doc_files")]
+    pub struct Model {
+        /// 文件 ID。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: Uuid,
+        /// 上传者。
+        pub uploader_id: Uuid,
+        /// 原始文件名。
+        pub name: String,
+        /// MIME 类型。
+        pub mime: String,
+        /// 字节数。
+        pub size: i32,
+        /// 文件内容。
+        #[sea_orm(column_type = "Binary(5_242_880)")]
+        pub data: Vec<u8>,
+        /// 上传时间。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}

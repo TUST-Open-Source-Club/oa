@@ -8,7 +8,7 @@
 - [x] 文档级可见性与分享：`private / space`，分享链接（token + 可选密码 + 有效期 + 只读）
 - [x] 搜索：标题 + 正文 `pg_trgm`，范围 = 我可读的空间
 - [ ] 导出 / 导入：Markdown、HTML；导入单篇 Markdown
-- [ ] 编辑器增强：自动保存 + 冲突提示、字数统计、图片粘贴上传、表格渲染
+- [x] 编辑器增强：自动保存（4s 防抖）+ 冲突提示、字数统计、图片粘贴上传、表格渲染（GFM）
 
 ## P1 · 协作
 
@@ -101,3 +101,20 @@ viewer 自动排除 `private`，已删除不出现，按更新时间倒序，返
 
 测试：`services/doc/tests/search_flow.rs` 4 条。
 截图：`docs/ui-preview/docs-search.png`。
+
+## 已完成（P0 第 4 项 · 编辑器增强）
+
+后端（文档图片）：
+- 迁移 v5：`doc_files`（≤5MB 存库）；
+- `POST /api/v1/doc/uploads`（JSON base64）→ `{ id, name, mime, size, url }`；
+- `GET /api/v1/doc/files/{id}?token=`：HS256 签名（**365 天**，因为 URL 会写进 Markdown 持久引用），
+  签名与文件不匹配 401，未登录上传 401，空/非法/超大 422。
+
+前端：
+- 编辑器换成 **GFM**（`commonmark + gfm`），表格、删除线、任务列表都可渲染；新增「▦ 表格」工具；
+- 粘贴图片自动上传并插入 Markdown 图片；
+- 表格/图片样式补齐（边框、表头底色、暗色适配）；
+- 文档正文显示字数；编辑中停止输入 4 秒自动保存，冲突仍走 409 提示。
+
+测试：`services/doc/tests/uploads_flow.rs` 3 条。
+截图：`docs/ui-preview/docs-editor-table.png`。

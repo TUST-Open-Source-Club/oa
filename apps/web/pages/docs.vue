@@ -520,6 +520,18 @@ async function jumpToHeading(index: number) {
 /** 未保存提示。 */
 const dirty = computed(() => Boolean(current.value && draft.value !== current.value.contentMd))
 
+/** 正文字数（不含空白）。 */
+const wordCount = computed(() => draft.value.replace(/\s/g, '').length)
+
+/** 自动保存：编辑中且未保存时，停止输入 4 秒后保存。 */
+let autosaveTimer: ReturnType<typeof setTimeout> | undefined
+watch([draft, editing], () => {
+  if (!editing.value || !dirty.value || saving.value) return
+  clearTimeout(autosaveTimer)
+  autosaveTimer = setTimeout(() => void save(), 4000)
+})
+onUnmounted(() => clearTimeout(autosaveTimer))
+
 /** Ctrl/Cmd + S 保存。 */
 function onKeydown(event: KeyboardEvent) {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
@@ -823,7 +835,10 @@ onUnmounted(() => {
               <h1 class="text-[26px] leading-tight font-semibold tracking-[-0.02em] text-[var(--text-strong)]">
                 {{ current.title }}
               </h1>
-              <p class="mt-1.5 mb-6 text-[11px] text-neutral-400">v{{ current.version }} · Ctrl/Cmd + S 保存</p>
+              <p class="mt-1.5 mb-6 text-[11px] text-neutral-400">
+                v{{ current.version }} · {{ wordCount }} 字 · Ctrl/Cmd + S 保存
+                <span v-if="editing" class="ml-1 text-neutral-300">（停止输入 4 秒自动保存）</span>
+              </p>
               <div ref="editorRoot">
                 <MarkdownEditor
                   :key="`${current.id}-${editing ? 'edit' : 'view'}`"

@@ -20,6 +20,8 @@ pub mod config {
         pub bind_addr: String,
         /// JWT issuer。
         pub issuer: String,
+        /// 内部服务密钥（媒体签名等）。
+        pub internal_secret: String,
     }
 
     impl Config {
@@ -45,6 +47,10 @@ pub mod config {
                     .unwrap_or_else(|| "http://localhost:8081".to_string())
                     .trim_end_matches('/')
                     .to_string(),
+                internal_secret: map
+                    .get("INTERNAL_SERVICE_SECRET")
+                    .cloned()
+                    .unwrap_or_else(|| "dev-internal-secret".to_string()),
             })
         }
     }
@@ -165,6 +171,7 @@ pub mod migration;
 pub mod migration2;
 pub mod migration3;
 pub mod migration4;
+pub mod migration5;
 pub mod repo;
 /// HTTP 路由。
 pub mod routes;
@@ -183,6 +190,7 @@ pub fn build_router(state: SharedState) -> Router {
         .layer(axum::middleware::from_fn(|req, next| {
             club_auth_sdk::guard::guard_bot_request(req, next, "doc")
         }))
+        .layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

@@ -325,6 +325,149 @@ pub async fn get_node(
     })))
 }
 
+/// 单个媒体文件的最大字节数（5MB）。
+pub const MAX_FILE_BYTES: usize = 5 * 1024 * 1024;
+/// 文档图片签名有效期：365 天（URL 会写进 Markdown 持久引用）。
+const FILE_TOKEN_TTL_SECONDS: i64 = 365 * 24 * 3600;
+
+/// 上传请求（base64）。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadFileRequest {
+    /// 原始文件名。
+    pub name: String,
+    /// MIME 类型。
+    pub mime: String,
+    /// 文件内容的 base64。
+    pub data_base64: String,
+}
+
+/// 文件签名载荷。
+#[derive(Debug, Serialize, Deserialize)]
+struct FileTokenClaims {
+    /// 文件 ID。
+    sub: String,
+    /// 过期时间戳。
+    exp: i64,
+}
+
+/// 生成文件下载签名（HS256，服务内部密钥）。
+fn sign_file_token(secret: &str, file_id: Uuid) -> Result<String, AppError> {
+    let claims = FileTokenClaims {
+        sub: file_id.to_string(),
+        exp: chrono::Utc::now().timestamp() + FILE_TOKEN_TTL_SECONDS,
+    };
+    jsonwebtoken::encode(
+        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(AppError::internal)
+}
+
+/// `POST /uploads`：上传图片/附件，返回可直接写进 Markdown 的 URL。
+pub async fn upload_file(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(input): Json<UploadFileRequest>,
+) -> Result<(StatusCode, Json<Value>), AppError> {
+    use base64::Engine as _;
+
+    let user_id = user_id_of(&auth)?;
+    let name = input.name.trim();
+    if name.is_empty() || name.chars().count() > 200 {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "文件名不合法",
+            vec![FieldError::new("name", "不能为空且不超过 200 字")],
+        ));
+    }
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(input.data_base64.trim())
+        .map_err(|_| {
+            AppError::unprocessable(
+                "DOC_VALIDATION",
+                "文件内容不是合法 base64",
+                vec![FieldError::new("dataBase64", "格式错误")],
+            )
+        })?;
+    if data.is_empty() || data.len() > MAX_FILE_BYTES {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "文件大小不合法",
+            vec![FieldError::new(
+                "dataBase64",
+                format!("需在 1 字节到 {}MB 之间", MAX_FILE_BYTES / 1024 / 1024),
+            )],
+        ));
+    }
+    let mime = if input.mime.trim().is_empty() {
+        "application/octet-stream"
+    } else {
+        input.mime.trim()
+    };
+    let model = repo::insert_file(&state.db, user_id, name, mime, data, state.now()).await?;
+    let token = sign_file_token(&state.config.internal_secret, model.id)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "id": model.id,
+            "name": model.name,
+            "mime": model.mime,
+            "size": model.size,
+            "url": format!("/api/v1/doc/files/{}?token={}", model.id, token),
+        })),
+    ))
+}
+
+/// 下载查询参数。
+#[derive(Debug, Deserialize)]
+pub struct FileTokenQuery {
+    /// 签名。
+    pub token: String,
+}
+
+/// `GET /files/{id}?token=`：按签名下载（`<img>` 可直接引用）。
+pub async fn download_file(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+    axum::extract::Query(query): axum::extract::Query<FileTokenQuery>,
+) -> Result<axum::response::Response, AppError> {
+    use axum::response::IntoResponse;
+    let validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+    let decoded = jsonwebtoken::decode::<FileTokenClaims>(
+        &query.token,
+        &jsonwebtoken::DecodingKey::from_secret(state.config.internal_secret.as_bytes()),
+        &validation,
+    )
+    .map_err(|_| AppError::unauthorized("AUTH_INVALID_TOKEN", "下载链接无效或已过期"))?;
+    if decoded.claims.sub != id.to_string() {
+        return Err(AppError::unauthorized(
+            "AUTH_INVALID_TOKEN",
+            "下载链接与文件不匹配",
+        ));
+    }
+    let file = repo::find_file(&state.db, id)
+        .await?
+        .ok_or_else(|| AppError::not_found("DOC_FILE_NOT_FOUND", "文件不存在"))?;
+    let filename = file.name.replace(['"', '\n', '\r'], "");
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, file.mime),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{filename}\""),
+            ),
+            (
+                axum::http::header::CACHE_CONTROL,
+                "private, max-age=86400".to_string(),
+            ),
+        ],
+        file.data,
+    )
+        .into_response())
+}
+
 /// 搜索参数。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -827,4 +970,6 @@ pub fn router() -> Router<SharedState> {
         )
         .route("/public/{token}", get(public_doc))
         .route("/search", get(search_docs))
+        .route("/uploads", post(upload_file))
+        .route("/files/{id}", get(download_file))
 }

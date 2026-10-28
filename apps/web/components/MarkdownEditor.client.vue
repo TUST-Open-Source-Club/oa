@@ -24,14 +24,19 @@ let commands: Record<string, { key: unknown }> = {}
 onMounted(async () => {
   if (!root.value) return
   try {
-    const [{ Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx }, { commonmark }, { listener, listenerCtx }, utils, preset] =
-      await Promise.all([
-        import('@milkdown/kit/core'),
-        import('@milkdown/kit/preset/commonmark'),
-        import('@milkdown/kit/plugin/listener'),
-        import('@milkdown/kit/utils'),
-        import('@milkdown/kit/preset/commonmark'),
-      ])
+    const [
+      { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx },
+      gfmPreset,
+      preset,
+      { listener, listenerCtx },
+      utils,
+    ] = await Promise.all([
+      import('@milkdown/kit/core'),
+      import('@milkdown/kit/preset/gfm'),
+      import('@milkdown/kit/preset/commonmark'),
+      import('@milkdown/kit/plugin/listener'),
+      import('@milkdown/kit/utils'),
+    ])
     callCommand = utils.callCommand as typeof callCommand
     commands = {
       bold: preset.toggleStrongCommand,
@@ -45,18 +50,32 @@ onMounted(async () => {
       quote: preset.wrapInBlockquoteCommand,
       codeBlock: preset.createCodeBlockCommand,
       hr: preset.insertHrCommand,
+      image: preset.insertImageCommand,
+      table: gfmPreset.insertTableCommand,
     }
     const instance = await Editor.make()
       .config((ctx) => {
         ctx.set(rootCtx, root.value as HTMLElement)
         ctx.set(defaultValueCtx, props.modelValue)
-        ctx.set(editorViewOptionsCtx, { editable: () => !props.readonly })
+        ctx.set(editorViewOptionsCtx, {
+          editable: () => !props.readonly,
+          handlePaste: (_view: unknown, event: ClipboardEvent) => {
+            const file = [...(event.clipboardData?.files ?? [])].find((item) =>
+              item.type.startsWith('image/'),
+            )
+            if (!file) return false
+            event.preventDefault()
+            void uploadImage(file)
+            return true
+          },
+        })
         ctx.get(listenerCtx).markdownUpdated((_, markdown) => {
           latest = markdown
           emit('update:modelValue', markdown)
         })
       })
-      .use(commonmark)
+      .use(preset.commonmark)
+      .use(gfmPreset.gfm)
       .use(listener)
       .create()
     editor.value = instance as unknown as typeof editor.value
@@ -72,6 +91,38 @@ onBeforeUnmount(async () => {
   await editor.value?.destroy()
   editor.value = null
 })
+
+/** 上传图片并插入 Markdown 图片节点。 */
+async function uploadImage(file: File) {
+  if (file.size > 5 * 1024 * 1024) {
+    console.warn('图片超过 5MB，已忽略')
+    return
+  }
+  try {
+    const auth = useAuthStore()
+    const dataBase64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = String(reader.result ?? '')
+        resolve(result.slice(result.indexOf(',') + 1))
+      }
+      reader.onerror = () => reject(reader.error ?? new Error('读取失败'))
+      reader.readAsDataURL(file)
+    })
+    const uploaded = await $fetch<{ url: string }>('/api/doc/uploads', {
+      method: 'POST',
+      headers: auth.authHeaders(),
+      body: {
+        name: file.name || 'image.png',
+        mime: file.type || 'image/png',
+        dataBase64,
+      },
+    })
+    run('image', { src: uploaded.url.replace('/api/v1/doc/', '/api/doc/'), alt: file.name })
+  } catch (error) {
+    console.error('图片上传失败', error)
+  }
+}
 
 /** 触发格式化命令。 */
 function run(name: string, payload?: unknown) {
@@ -92,6 +143,7 @@ const tools = [
   { name: 'quote', label: '❝', class: '', payload: undefined },
   { name: 'codeBlock', label: '{ }', class: 'font-mono text-xs', payload: undefined },
   { name: 'hr', label: '—', class: '', payload: undefined },
+  { name: 'table', label: '▦ 表格', class: '', payload: { row: 3, col: 3 } },
 ]
 
 defineExpose({
@@ -199,6 +251,36 @@ defineExpose({
   background: transparent;
   color: inherit;
   padding: 0;
+}
+.milkdown-content .ProseMirror table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2em 0;
+  font-size: 0.92em;
+}
+.milkdown-content .ProseMirror th,
+.milkdown-content .ProseMirror td {
+  border: 1px solid #e5e7eb;
+  padding: 0.4em 0.7em;
+  text-align: left;
+  vertical-align: top;
+}
+.milkdown-content .ProseMirror th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+.milkdown-content .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-field);
+  margin: 0.6em 0;
+}
+.dark .milkdown-content .ProseMirror th,
+.dark .milkdown-content .ProseMirror td {
+  border-color: #374151;
+}
+.dark .milkdown-content .ProseMirror th {
+  background: #1f2937;
 }
 .milkdown-content .ProseMirror a {
   color: #4f46e5;
