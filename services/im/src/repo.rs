@@ -316,6 +316,8 @@ pub struct NewMessage {
     pub reply_to_id: Option<Uuid>,
     /// 客户端幂等 ID。
     pub client_msg_id: Option<String>,
+    /// @ 提及（成员 ID 与 `"@all"`）。
+    pub mentions: Vec<String>,
 }
 
 /// 插入消息（clientMsgId 幂等：重复发送返回既有消息与 `false`）。
@@ -346,6 +348,8 @@ pub async fn insert_message(
         content: Set(new.content),
         reply_to_id: Set(new.reply_to_id),
         client_msg_id: Set(new.client_msg_id),
+        mentions: Set(serde_json::json!(new.mentions)),
+        edited_at: Set(None),
         status: Set("normal".to_string()),
         recalled_at: Set(None),
         created_at: Set(now.fixed_offset()),

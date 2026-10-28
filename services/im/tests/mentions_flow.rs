@@ -22,7 +22,10 @@ async fn create_group(app: &TestApp, token: &str, members: &[Uuid], name: &str) 
         Some(&json!({ "type": "group", "name": name, "memberIds": members })),
     )
     .await;
-    response.expect(StatusCode::CREATED)["id"].as_str().unwrap().to_string()
+    response.expect(StatusCode::CREATED)["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
 }
 
 /// 建单聊。
@@ -35,7 +38,10 @@ async fn create_direct(app: &TestApp, token: &str, other: Uuid) -> String {
         Some(&json!({ "type": "direct", "memberIds": [other] })),
     )
     .await;
-    response.expect(StatusCode::CREATED)["id"].as_str().unwrap().to_string()
+    response.expect(StatusCode::CREATED)["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
 }
 
 /// 发送带 mentions 的文本消息。
@@ -70,7 +76,13 @@ async fn mention_member_is_persisted_and_returned() {
     let member_token = issue_token(&app, member);
     let conversation_id = create_group(&app, &owner_token, &[member], "提及测试群").await;
 
-    let sent = send_with_mentions(&app, &owner_token, &conversation_id, json!([member.to_string()])).await;
+    let sent = send_with_mentions(
+        &app,
+        &owner_token,
+        &conversation_id,
+        json!([member.to_string()]),
+    )
+    .await;
     let body = sent.expect(StatusCode::CREATED);
     assert_eq!(body["mentions"], json!([member.to_string()]));
 
@@ -97,7 +109,13 @@ async fn mention_non_member_is_rejected() {
     let owner_token = issue_token(&app, owner);
     let conversation_id = create_group(&app, &owner_token, &[member], "提及测试群").await;
 
-    let sent = send_with_mentions(&app, &owner_token, &conversation_id, json!([outsider.to_string()])).await;
+    let sent = send_with_mentions(
+        &app,
+        &owner_token,
+        &conversation_id,
+        json!([outsider.to_string()]),
+    )
+    .await;
     sent.expect(StatusCode::BAD_REQUEST);
 }
 

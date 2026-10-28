@@ -59,6 +59,10 @@ pub struct MessageDto {
     pub reply_to_id: Option<String>,
     /// 状态。
     pub status: String,
+    /// @ 提及（成员 ID 与 `"@all"`）。
+    pub mentions: Vec<String>,
+    /// 编辑时间。
+    pub edited_at: Option<DateTime<FixedOffset>>,
     /// 时间。
     pub created_at: DateTime<FixedOffset>,
 }
@@ -73,6 +77,17 @@ impl From<&message::Model> for MessageDto {
             content: model.content.clone(),
             reply_to_id: model.reply_to_id.map(|id| id.to_string()),
             status: model.status.clone(),
+            mentions: model
+                .mentions
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            edited_at: model.edited_at.map(|t| t.fixed_offset()),
             created_at: model.created_at,
         }
     }
@@ -263,6 +278,50 @@ pub struct SendMessageRequest {
     pub content: Value,
     /// 引用。
     pub reply_to_id: Option<Uuid>,
+    /// @ 提及：成员 ID 数组，`"@all"` 表示所有人。
+    #[serde(default)]
+    pub mentions: Vec<String>,
+}
+
+/// 校验 `mentions`：成员必须在会话内；`"@all"` 仅群主/管理员、且仅群聊可用。
+async fn validate_mentions(
+    state: &SharedState,
+    ctx: &crate::repo::ConversationWithMember,
+    mentions: &[String],
+) -> Result<Vec<String>, AppError> {
+    if mentions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let privileged = matches!(ctx.member.role.as_str(), "owner" | "admin");
+    for mention in mentions {
+        if mention == "@all" {
+            if ctx.conversation.r#type != "group" {
+                return Err(AppError::bad_request(
+                    "IM_MENTION_ALL_INVALID",
+                    "单聊不支持 @所有人",
+                ));
+            }
+            if !privileged {
+                return Err(AppError::forbidden(
+                    "IM_MENTION_ALL_FORBIDDEN",
+                    "只有群主或管理员可以 @所有人",
+                ));
+            }
+            continue;
+        }
+        let id = Uuid::parse_str(mention)
+            .map_err(|_| AppError::bad_request("IM_MENTION_INVALID", "提及的用户不存在"))?;
+        if crate::repo::get_conversation_for_member(&state.db, ctx.conversation.id, id)
+            .await
+            .is_err()
+        {
+            return Err(AppError::bad_request(
+                "IM_MENTION_NOT_MEMBER",
+                "只能 @ 会话内的成员",
+            ));
+        }
+    }
+    Ok(mentions.to_vec())
 }
 
 /// `POST /conversations/{id}/messages`：发送消息（HTTP 通道）。
@@ -289,6 +348,7 @@ pub async fn send_message(
             ));
         }
     }
+    let mentions = validate_mentions(&state, &ctx, &input.mentions).await?;
     let (model, created) = crate::service::create_message(
         &state,
         user_id,
@@ -297,6 +357,7 @@ pub async fn send_message(
         &input.content,
         input.reply_to_id,
         input.client_msg_id,
+        mentions,
     )
     .await?;
     if created {

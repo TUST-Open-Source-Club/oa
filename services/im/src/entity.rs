@@ -132,6 +132,12 @@ pub mod message {
         /// 客户端幂等 ID。
         #[sea_orm(nullable)]
         pub client_msg_id: Option<String>,
+        /// @ 提及（用户 ID 数组，含 `"@all"` 标记）。
+        #[sea_orm(column_type = "JsonBinary")]
+        pub mentions: Json,
+        /// 编辑时间（P1 编辑历史用）。
+        #[sea_orm(nullable)]
+        pub edited_at: Option<DateTimeWithTimeZone>,
         /// 状态：normal / recalled。
         pub status: String,
         /// 撤回时间。

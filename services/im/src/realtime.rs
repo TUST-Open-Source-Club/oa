@@ -185,6 +185,7 @@ async fn handle_client_text(state: &SharedState, user_id: Uuid, text: &str) -> O
                 &content,
                 reply_to_id,
                 client_msg_id.clone(),
+                Vec::new(),
             )
             .await
             {

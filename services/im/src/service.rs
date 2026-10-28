@@ -15,6 +15,8 @@ use crate::state::SharedState;
 pub const RECALL_WINDOW_SECONDS: i64 = 120;
 
 /// 发送消息（幂等），返回消息与是否新建；新建时写 outbox 事件。
+// 发消息参数较多（类型/内容/引用/幂等/提及），平铺比再包一层结构体更直观。
+#[allow(clippy::too_many_arguments)]
 pub async fn create_message(
     state: &SharedState,
     sender_id: Uuid,
@@ -23,6 +25,7 @@ pub async fn create_message(
     content: &Value,
     reply_to_id: Option<Uuid>,
     client_msg_id: Option<String>,
+    mentions: Vec<String>,
 ) -> Result<(message::Model, bool), AppError> {
     domain::validate_message(kind, content)?;
     let ctx = repo::get_conversation_for_member(&state.db, conversation_id, sender_id).await?;
@@ -49,6 +52,7 @@ pub async fn create_message(
             content: content.clone(),
             reply_to_id,
             client_msg_id,
+            mentions,
         },
         now,
     )
