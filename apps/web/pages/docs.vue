@@ -21,6 +21,14 @@ interface NodeDetail {
   title: string
   version: number
   contentMd: string
+  visibility?: string
+}
+interface ShareInfo {
+  token: string | null
+  url: string | null
+  hasPassword: boolean
+  expiresAt: string | null
+  permission: string | null
 }
 interface VersionItem {
   version: number
@@ -58,6 +66,14 @@ const renameTarget = ref<NodeItem | null>(null)
 const moveOpen = ref(false)
 const moveTarget = ref<NodeItem | null>(null)
 const moveParent = ref('')
+
+const shareOpen = ref(false)
+const shareInfo = ref<ShareInfo | null>(null)
+const sharePassword = ref('')
+const shareExpiry = ref('')
+const shareSaving = ref(false)
+const shareCopied = ref(false)
+const visibility = ref<'space' | 'private'>('space')
 
 const createOpen = ref(false)
 const createKind = ref<'page' | 'folder'>('page')
@@ -234,6 +250,79 @@ async function deleteNode(node: NodeItem) {
       current.value = null
       draft.value = ''
     }
+    await loadTree()
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  }
+}
+
+/** 打开分享设置。 */
+async function openShare() {
+  if (!current.value) return
+  shareCopied.value = false
+  sharePassword.value = ''
+  shareExpiry.value = ''
+  visibility.value = current.value.visibility === 'private' ? 'private' : 'space'
+  shareOpen.value = true
+  await api<ShareInfo>(`spaces/${spaceId.value}/nodes/${current.value.id}/share`)
+    .then((info) => {
+      shareInfo.value = info
+      shareExpiry.value = info.expiresAt
+        ? new Date(info.expiresAt).toISOString().slice(0, 16)
+        : ''
+    })
+    .catch(() => {
+      shareInfo.value = { token: null, url: null, hasPassword: false, expiresAt: null, permission: null }
+    })
+}
+
+/** 保存分享设置（生成或更新链接）。 */
+async function saveShare() {
+  if (!current.value || shareSaving.value) return
+  shareSaving.value = true
+  errorMessage.value = ''
+  try {
+    const body: Record<string, unknown> = { permission: 'read' }
+    if (sharePassword.value.trim()) body.password = sharePassword.value.trim()
+    if (shareExpiry.value) body.expiresAt = new Date(shareExpiry.value).toISOString()
+    const info = await api<ShareInfo>(
+      `spaces/${spaceId.value}/nodes/${current.value.id}/share`,
+      { method: 'POST', body },
+    )
+    shareInfo.value = info
+    sharePassword.value = ''
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  } finally {
+    shareSaving.value = false
+  }
+}
+
+/** 关闭分享。 */
+async function revokeShare() {
+  if (!current.value) return
+  await api(`spaces/${spaceId.value}/nodes/${current.value.id}/share`, { method: 'DELETE' })
+  shareInfo.value = { token: null, url: null, hasPassword: false, expiresAt: null, permission: null }
+}
+
+/** 复制分享链接。 */
+async function copyShare() {
+  if (!shareInfo.value?.url) return
+  await navigator.clipboard.writeText(`${window.location.origin}${shareInfo.value.url}`)
+  shareCopied.value = true
+}
+
+/** 切换文档可见性。 */
+async function setVisibility(next: 'space' | 'private') {
+  if (!current.value) return
+  visibility.value = next
+  errorMessage.value = ''
+  try {
+    await api(`spaces/${spaceId.value}/nodes/${current.value.id}`, {
+      method: 'PATCH',
+      body: { visibility: next },
+    })
+    current.value.visibility = next
     await loadTree()
   } catch (error) {
     errorMessage.value = apiErrorMessage(error)
@@ -501,6 +590,69 @@ onUnmounted(() => {
       >删除</button>
     </div>
 
+    <!-- 分享 -->
+    <AppModal :open="shareOpen" title="分享文档" @close="shareOpen = false">
+      <div class="space-y-4">
+        <label class="block">
+          <span class="mb-1 block text-[11px] font-medium text-neutral-500">可见性</span>
+          <select
+            :value="visibility"
+            class="h-9 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[13px] text-[var(--text-strong)] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+            @change="setVisibility(($event.target as HTMLSelectElement).value as 'space' | 'private')"
+          >
+            <option value="space">空间成员可见</option>
+            <option value="private">仅编辑者可见</option>
+          </select>
+        </label>
+
+        <div class="rounded-[var(--radius-field)] border border-[var(--border)] p-3">
+          <p class="text-[12px] text-[var(--text-strong)]">分享链接</p>
+          <p class="mt-0.5 text-[11px] text-neutral-400">
+            任何拿到链接的人都能只读查看（可设置密码与有效期）。
+          </p>
+          <div v-if="shareInfo?.token" class="mt-2 flex items-center gap-2">
+            <input
+              readonly
+              :value="shareInfo.url ?? ''"
+              class="h-8 min-w-0 flex-1 rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface-muted)] px-2 text-[11px] text-neutral-500"
+            />
+            <Button size="sm" variant="secondary" @click="copyShare">
+              {{ shareCopied ? '已复制' : '复制' }}
+            </Button>
+          </div>
+          <p v-else class="mt-2 text-[11px] text-neutral-400">尚未开启分享</p>
+          <div class="mt-3 grid grid-cols-2 gap-2">
+            <label class="block">
+              <span class="mb-1 block text-[11px] text-neutral-500">访问密码（可选）</span>
+              <input
+                v-model="sharePassword"
+                type="password"
+                :placeholder="shareInfo?.hasPassword ? '留空则取消密码' : '不设置'"
+                class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+              />
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-[11px] text-neutral-500">有效期（可选）</span>
+              <input
+                v-model="shareExpiry"
+                type="datetime-local"
+                class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12px] text-[var(--text-strong)] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+              />
+            </label>
+          </div>
+          <div class="mt-3 flex items-center gap-2">
+            <Button size="sm" :loading="shareSaving" @click="saveShare">
+              {{ shareInfo?.token ? '更新分享' : '生成链接' }}
+            </Button>
+            <Button v-if="shareInfo?.token" size="sm" variant="secondary" @click="revokeShare">关闭分享</Button>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <Button variant="secondary" @click="shareOpen = false">完成</Button>
+      </template>
+    </AppModal>
+
     <!-- 重命名 -->
     <AppModal :open="renameOpen" title="重命名" @close="renameOpen = false">
       <input
@@ -579,7 +731,10 @@ onUnmounted(() => {
               <Button size="sm" variant="secondary" @click="cancelEdit">取消</Button>
               <Button size="sm" :loading="saving" @click="save">保存</Button>
             </template>
-            <Button v-else size="sm" @click="editing = true">编辑</Button>
+            <template v-else>
+              <Button size="sm" variant="secondary" @click="openShare">分享</Button>
+              <Button size="sm" @click="editing = true">编辑</Button>
+            </template>
           </div>
         </div>
 

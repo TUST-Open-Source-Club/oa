@@ -168,6 +168,11 @@ pub async fn create_node(
         version: Set(1),
         content_md: Set(String::new()),
         updated_by: Set(user_id),
+        visibility: Set("space".to_string()),
+        share_token: Set(None),
+        share_password_hash: Set(None),
+        share_expires_at: Set(None),
+        share_permission: Set(None),
         deleted_at: Set(None),
         created_at: Set(now.fixed_offset()),
         updated_at: Set(now.fixed_offset()),
@@ -311,23 +316,37 @@ pub async fn descendant_ids(
     Ok(result)
 }
 
-/// 更新节点元信息（标题/父节点/排序）。
+/// 节点元信息变更（未提供的字段保持不变）。
+#[derive(Debug, Default)]
+pub struct NodeMetaUpdate<'a> {
+    /// 新标题。
+    pub title: Option<&'a str>,
+    /// 新父节点（`Some(None)` 表示移到根）。
+    pub parent_id: Option<Option<Uuid>>,
+    /// 同级排序。
+    pub position: Option<i64>,
+    /// 可见性。
+    pub visibility: Option<&'a str>,
+}
+
+/// 更新节点元信息（标题/父节点/排序/可见性）。
 pub async fn update_node_meta(
     db: &DatabaseConnection,
     node: &node::Model,
-    title: Option<&str>,
-    parent_id: Option<Option<Uuid>>,
-    position: Option<i64>,
+    change: NodeMetaUpdate<'_>,
     editor: Uuid,
     now: DateTime<Utc>,
 ) -> Result<node::Model, AppError> {
     let mut active: node::ActiveModel = node.clone().into();
-    if let Some(title) = title {
+    if let Some(visibility) = change.visibility {
+        active.visibility = Set(visibility.to_string());
+    }
+    if let Some(title) = change.title {
         active.title = Set(title.to_string());
     }
-    if let Some(parent) = parent_id {
+    if let Some(parent) = change.parent_id {
         // 移动到新父级且未显式指定排序时，排到同级末尾
-        if position.is_none() && parent != node.parent_id {
+        if change.position.is_none() && parent != node.parent_id {
             let max_position: Option<i64> = node::Entity::find()
                 .filter(node::Column::SpaceId.eq(node.space_id))
                 .filter(node::Column::DeletedAt.is_null())
@@ -344,7 +363,7 @@ pub async fn update_node_meta(
         }
         active.parent_id = Set(parent);
     }
-    if let Some(position) = position {
+    if let Some(position) = change.position {
         active.position = Set(position);
     }
     active.updated_by = Set(editor);
@@ -409,4 +428,50 @@ pub async fn restore_subtree(
         .map_err(map_db_err)?;
     let _ = now;
     Ok(result.rows_affected)
+}
+
+/// 按分享 token 查节点（含已删除，由调用方判断）。
+pub async fn find_node_by_share_token(
+    db: &DatabaseConnection,
+    token: &str,
+) -> Result<Option<node::Model>, AppError> {
+    node::Entity::find()
+        .filter(node::Column::ShareToken.eq(token))
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 写入/更新分享设置。
+pub async fn set_share(
+    db: &DatabaseConnection,
+    node: &node::Model,
+    token: &str,
+    password_hash: Option<&str>,
+    expires_at: Option<DateTime<Utc>>,
+    permission: &str,
+    now: DateTime<Utc>,
+) -> Result<node::Model, AppError> {
+    let mut active: node::ActiveModel = node.clone().into();
+    active.share_token = Set(Some(token.to_string()));
+    active.share_password_hash = Set(password_hash.map(str::to_string));
+    active.share_expires_at = Set(expires_at.map(|value| value.fixed_offset()));
+    active.share_permission = Set(Some(permission.to_string()));
+    active.updated_at = Set(now.fixed_offset());
+    active.update(db).await.map_err(map_db_err)
+}
+
+/// 关闭分享（清空 token 与密码）。
+pub async fn clear_share(
+    db: &DatabaseConnection,
+    node: &node::Model,
+    now: DateTime<Utc>,
+) -> Result<node::Model, AppError> {
+    let mut active: node::ActiveModel = node.clone().into();
+    active.share_token = Set(None);
+    active.share_password_hash = Set(None);
+    active.share_expires_at = Set(None);
+    active.share_permission = Set(None);
+    active.updated_at = Set(now.fixed_offset());
+    active.update(db).await.map_err(map_db_err)
 }

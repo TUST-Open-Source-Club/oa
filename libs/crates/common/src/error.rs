@@ -52,6 +52,14 @@ pub enum AppError {
         /// 面向用户的错误描述。
         detail: String,
     },
+    /// 410：资源已失效（分享过期等）。
+    #[error("{detail}")]
+    Gone {
+        /// 业务错误码。
+        code: String,
+        /// 面向用户的错误描述。
+        detail: String,
+    },
     /// 429：触发限流。
     #[error("{detail}")]
     TooManyRequests {
@@ -116,6 +124,14 @@ impl AppError {
         }
     }
 
+    /// 构造 410 资源失效错误。
+    pub fn gone(code: impl Into<String>, detail: impl Into<String>) -> Self {
+        AppError::Gone {
+            code: code.into(),
+            detail: detail.into(),
+        }
+    }
+
     /// 构造 429 限流错误。
     pub fn too_many_requests(code: impl Into<String>, detail: impl Into<String>) -> Self {
         Self::TooManyRequests {
@@ -150,6 +166,7 @@ impl AppError {
             AppError::Forbidden { .. } => StatusCode::FORBIDDEN,
             AppError::NotFound { .. } => StatusCode::NOT_FOUND,
             AppError::Conflict { .. } => StatusCode::CONFLICT,
+            AppError::Gone { .. } => StatusCode::GONE,
             AppError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             AppError::Unprocessable { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -164,6 +181,7 @@ impl AppError {
             | AppError::Forbidden { code, .. }
             | AppError::NotFound { code, .. }
             | AppError::Conflict { code, .. }
+            | AppError::Gone { code, .. }
             | AppError::TooManyRequests { code, .. }
             | AppError::Unprocessable { code, .. } => code,
             AppError::Internal(_) => "INTERNAL",
@@ -178,6 +196,7 @@ impl AppError {
             AppError::Forbidden { detail, .. } => ("Forbidden", detail.clone(), None),
             AppError::NotFound { detail, .. } => ("Not Found", detail.clone(), None),
             AppError::Conflict { detail, .. } => ("Conflict", detail.clone(), None),
+            AppError::Gone { detail, .. } => ("Gone", detail.clone(), None),
             AppError::TooManyRequests { detail, .. } => ("Too Many Requests", detail.clone(), None),
             AppError::Unprocessable { detail, errors, .. } => {
                 ("Unprocessable Entity", detail.clone(), Some(errors.clone()))

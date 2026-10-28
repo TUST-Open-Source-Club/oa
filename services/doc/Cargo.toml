@@ -16,6 +16,7 @@ chrono.workspace = true
 club-auth-sdk.workspace = true
 club-bus.workspace = true
 club-common.workspace = true
+sha2.workspace = true
 jsonwebtoken.workspace = true
 reqwest.workspace = true
 sea-orm.workspace = true

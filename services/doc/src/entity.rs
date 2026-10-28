@@ -103,6 +103,20 @@ pub mod node {
         pub content_md: String,
         /// 创建者/最后编辑者。
         pub updated_by: Uuid,
+        /// 可见性：space（空间成员）/ private（仅编辑者）。
+        pub visibility: String,
+        /// 分享 token（None = 未分享）。
+        #[sea_orm(nullable)]
+        pub share_token: Option<String>,
+        /// 分享密码哈希（argon2，盐为 token）。
+        #[sea_orm(nullable)]
+        pub share_password_hash: Option<String>,
+        /// 分享过期时间。
+        #[sea_orm(nullable)]
+        pub share_expires_at: Option<DateTimeWithTimeZone>,
+        /// 分享权限（当前仅 read）。
+        #[sea_orm(nullable)]
+        pub share_permission: Option<String>,
         /// 软删除时间。
         #[sea_orm(nullable)]
         pub deleted_at: Option<DateTimeWithTimeZone>,

@@ -5,7 +5,7 @@
 ## P0 · 基础体验
 
 - [x] 目录树操作：重命名 / 移动 / 同级上移下移 / 软删（整棵子树）；面包屑已有
-- [ ] 文档级可见性与分享：`private / space / public`，分享链接（token + 可选密码 + 有效期 + 只读/可评论）
+- [x] 文档级可见性与分享：`private / space`，分享链接（token + 可选密码 + 有效期 + 只读）
 - [ ] 搜索：标题 + 正文 `pg_trgm`，范围 = 我可读的空间
 - [ ] 导出 / 导入：Markdown、HTML；导入单篇 Markdown
 - [ ] 编辑器增强：自动保存 + 冲突提示、字数统计、图片粘贴上传、表格渲染
@@ -39,8 +39,8 @@ node_follows(user_id, node_id, created_at)
 PATCH  /spaces/{id}/nodes/{node_id}        { title?, parentId?, position? }   ✅
 DELETE /spaces/{id}/nodes/{node_id}         软删整棵子树                        ✅
 POST   /spaces/{id}/nodes/{node_id}/restore 恢复整棵子树                        ✅
-POST   /spaces/{id}/nodes/{node_id}/share
-GET    /public/docs/{token}
+POST   /spaces/{id}/nodes/{node_id}/share   ✅
+GET    /public/{token}                        ✅
 GET    /search?q=
 GET    /spaces/{id}/nodes/{node_id}/export?format=md|html
 POST   /spaces/{id}/import
@@ -65,3 +65,24 @@ GET    /stars
 截图 `docs/ui-preview/docs-tree-menu.png`。
 
 测试：`services/doc/tests/tree_flow.rs` 4 条。
+
+## 已完成（P0 第 2 项 · 可见性 + 分享）
+
+迁移 v3：`nodes.visibility`（`space` 默认 / `private`）、`share_token`、`share_password_hash`、
+`share_expires_at`、`share_permission`，`share_token` 唯一部分索引。
+
+接口：
+- `PATCH .../nodes/{nodeId}` 增加 `visibility`；`viewer` 在树里看不到 private，直接读取 403；
+- `POST .../nodes/{nodeId}/share`（仅编辑者）：生成/轮换链接，可选密码与过期时间，
+  密码用 `sha256(token || password)`，token 即 128 位随机盐；
+- `GET .../share` 查看当前分享；`DELETE .../share` 关闭；
+- `GET /api/v1/doc/public/{token}?password=`：免登录只读，缺少密码 401、
+  密码错误 401、过期 410 `DOC_SHARE_EXPIRED`、关闭/不存在 404。
+
+`AppError` 新增 `Gone`（410）变体。
+
+前端：文档顶栏「分享」弹窗（可见性切换、生成/更新/关闭链接、密码、有效期、复制）；
+公开页 `/s/doc/{token}`（只读渲染 + 密码框 + 过期提示），BFF 新增 `/api/doc/public/[token]`。
+
+测试：`services/doc/tests/share_flow.rs` 5 条。
+截图：`docs/ui-preview/docs-share-modal.png`、`docs-public-page.png`。
