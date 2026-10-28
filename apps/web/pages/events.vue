@@ -213,23 +213,30 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <div class="flex items-center justify-between gap-2">
-      <h1 class="text-xl font-semibold">活动报名</h1>
+  <div class="mx-auto w-full max-w-[1200px] space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <p class="text-[12px] text-neutral-500">创建活动、审核报名与签到统计</p>
       <Button size="sm" @click="createOpen = true">
         <AppIcon name="plus" class="size-4" /> 新建活动
       </Button>
     </div>
-    <p v-if="message || errorMessage" role="alert" class="text-sm text-danger-500">{{ errorMessage || message }}</p>
+    <p
+      v-if="message || errorMessage"
+      role="alert"
+      class="rounded-[var(--radius-field)] border border-danger-500/30 bg-danger-50 px-3 py-2 text-[12px] text-danger-700 dark:bg-danger-500/10"
+    >
+      {{ errorMessage || message }}
+    </p>
 
 
-    <div class="grid gap-4 lg:grid-cols-[260px_1fr]">
-      <Card class="space-y-2">
+    <div class="grid gap-3 lg:grid-cols-[240px_1fr]">
+      <Card class="space-y-1">
+        <p class="px-2 pb-1 text-[10px] font-medium tracking-[0.12em] text-neutral-400 uppercase">活动</p>
         <button
           v-for="item in events"
           :key="item.id"
-          class="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-neutral-100"
-          :class="selectedId === item.id ? 'bg-primary-50 text-primary-700' : ''"
+          class="block w-full rounded-[var(--radius-field)] px-2 py-1.5 text-left text-[13px] text-neutral-600 transition-colors hover:bg-[var(--surface-hover)] dark:text-neutral-300"
+          :class="selectedId === item.id ? 'bg-[var(--surface-hover)] font-medium text-[var(--text-strong)]' : ''"
           @click="selectedId = item.id; loadDetail()"
         >
           {{ item.title }}
@@ -281,7 +288,7 @@ onMounted(() => {
           </a>
         </div>
 
-        <div v-if="stats" class="flex flex-wrap gap-4 rounded bg-neutral-50 px-3 py-2 text-sm dark:bg-neutral-800/50">
+        <div v-if="stats" class="flex flex-wrap gap-4 rounded bg-neutral-50 px-3 py-2 text-[13px] dark:bg-neutral-800/50">
           <span>总数 {{ stats.total }}</span>
           <span class="text-success-700">已通过 {{ stats.approved }}</span>
           <span class="text-warning-700">待审核 {{ stats.pending }}</span>
@@ -289,7 +296,7 @@ onMounted(() => {
           <span>已签到 {{ stats.checkedIn }}</span>
         </div>
 
-        <div class="flex items-center gap-2 text-sm">
+        <div class="flex items-center gap-2 text-[13px]">
           <select v-model="statusFilter" class="rounded-[var(--radius-field)] border border-neutral-300 px-2 py-1.5" @change="loadDetail">
             <option value="">全部状态</option>
             <option value="approved">已通过</option>
@@ -300,7 +307,7 @@ onMounted(() => {
           </select>
         </div>
 
-        <div class="divide-y divide-neutral-100 text-sm">
+        <div class="divide-y divide-neutral-100 text-[13px]">
           <div v-for="row in registrations" :key="row.id" class="flex flex-wrap items-center justify-between gap-2 py-2">
             <div class="min-w-0">
               <span class="font-medium">{{ row.name || '未填写' }}</span>
@@ -320,30 +327,30 @@ onMounted(() => {
         </div>
       </Card>
 
-      <Card v-else class="text-sm text-neutral-400">选择或创建一个活动</Card>
+      <Card v-else class="text-[13px] text-neutral-400">选择或创建一个活动</Card>
     </div>
 
     <AppModal :open="createOpen" title="新建活动" @close="createOpen = false">
       <div class="space-y-3">
-        <label class="block text-sm">
+        <label class="block text-[13px]">
           <span class="mb-1 block text-xs text-neutral-500">标题</span>
           <Input v-model="newEvent.title" placeholder="活动标题" />
         </label>
-        <label class="block text-sm">
+        <label class="block text-[13px]">
           <span class="mb-1 block text-xs text-neutral-500">slug（报名链接 /e/&lt;slug&gt;）</span>
           <Input v-model="newEvent.slug" placeholder="小写字母/数字/-" />
         </label>
-        <label class="block text-sm">
+        <label class="block text-[13px]">
           <span class="mb-1 block text-xs text-neutral-500">名额</span>
           <input
             v-model.number="newEvent.capacity"
             type="number"
             min="0"
-            class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700"
+            class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-[13px] dark:border-neutral-700"
             placeholder="0 = 不限"
           />
         </label>
-        <div class="flex gap-4 text-sm">
+        <div class="flex gap-4 text-[13px]">
           <label class="flex items-center gap-1.5"><input v-model="newEvent.needReview" type="checkbox" /> 需审核</label>
           <label class="flex items-center gap-1.5"><input v-model="newEvent.emailVerify" type="checkbox" /> 邮箱验证</label>
         </div>
@@ -370,7 +377,7 @@ onMounted(() => {
         <div
           v-for="change in changes"
           :key="change.id"
-          class="flex items-center justify-between rounded-[var(--radius-field)] border border-neutral-200 px-2.5 py-1.5 text-sm dark:border-neutral-700"
+          class="flex items-center justify-between rounded-[var(--radius-field)] border border-[var(--border)] px-2.5 py-1.5 text-[13px] dark:border-neutral-700"
         >
           <span class="text-neutral-500">
             {{ change.action === 'update' ? '编辑' : change.action === 'form' ? '表单变更' : change.action === 'undo' ? '撤销' : change.action }}
@@ -379,7 +386,7 @@ onMounted(() => {
           <button class="text-primary-600 hover:underline" @click="undoChange(change)">撤销</button>
         </div>
       </div>
-      <p v-else class="text-sm text-neutral-400">暂无操作记录</p>
+      <p v-else class="text-[13px] text-neutral-400">暂无操作记录</p>
     </AppModal>
 
     <AppModal :open="qrOpen" title="报名二维码" @close="qrOpen = false">
@@ -388,7 +395,7 @@ onMounted(() => {
           v-if="qrDataUrl"
           :src="qrDataUrl"
           alt="报名二维码"
-          class="size-64 rounded-lg border border-neutral-200 bg-white p-2 dark:border-neutral-700"
+          class="size-64 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 dark:border-neutral-700"
         />
         <p class="break-all text-center text-xs text-neutral-400">{{ shareUrl }}</p>
         <p class="text-xs text-neutral-400">扫码即可打开报名页，可保存图片后转发</p>
