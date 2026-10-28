@@ -14,7 +14,7 @@ use club_common::{new_id, AppError};
 
 use crate::domain::unread_of;
 use crate::entity::{
-    conversation, conversation_member, message, message_reaction, message_revision,
+    conversation, conversation_member, im_file, message, message_reaction, message_revision,
 };
 
 /// 将数据库错误映射为统一错误。
@@ -847,4 +847,38 @@ pub async fn set_member_notify_level(
     let mut active: conversation_member::ActiveModel = member.into();
     active.notify_level = Set(level.to_string());
     active.update(db).await.map_err(map_db_err)
+}
+
+/// 写入媒体文件。
+pub async fn insert_file(
+    db: &DatabaseConnection,
+    uploader_id: Uuid,
+    name: &str,
+    mime: &str,
+    data: Vec<u8>,
+    now: DateTime<Utc>,
+) -> Result<im_file::Model, AppError> {
+    im_file::ActiveModel {
+        id: Set(new_id()),
+        uploader_id: Set(uploader_id),
+        name: Set(name.to_string()),
+        mime: Set(mime.to_string()),
+        size: Set(data.len() as i32),
+        data: Set(data),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}
+
+/// 按 ID 读取媒体文件。
+pub async fn find_file(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> Result<Option<im_file::Model>, AppError> {
+    im_file::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(map_db_err)
 }

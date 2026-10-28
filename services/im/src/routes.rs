@@ -1,7 +1,8 @@
 //! HTTP 路由。
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use chrono::{DateTime, FixedOffset};
@@ -880,6 +881,146 @@ pub async fn remove_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// 单个媒体文件的最大字节数（5MB）。
+pub const MAX_FILE_BYTES: usize = 5 * 1024 * 1024;
+/// 媒体下载签名有效期（秒）。
+const FILE_TOKEN_TTL_SECONDS: i64 = 3600;
+
+/// 上传媒体文件请求（base64 编码，避免 multipart 依赖）。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadFileRequest {
+    /// 原始文件名。
+    pub name: String,
+    /// MIME 类型。
+    pub mime: String,
+    /// 文件内容的 base64。
+    pub data_base64: String,
+}
+
+/// 媒体下载签名载荷。
+#[derive(Debug, Serialize, Deserialize)]
+struct FileTokenClaims {
+    /// 文件 ID。
+    sub: String,
+    /// 过期时间戳。
+    exp: i64,
+}
+
+/// 生成媒体下载签名（HS256，用服务内部密钥）。
+fn sign_file_token(secret: &str, file_id: Uuid) -> Result<String, AppError> {
+    let claims = FileTokenClaims {
+        sub: file_id.to_string(),
+        exp: chrono::Utc::now().timestamp() + FILE_TOKEN_TTL_SECONDS,
+    };
+    jsonwebtoken::encode(
+        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(AppError::internal)
+}
+
+/// `POST /uploads`：上传媒体文件（返回可直接放进消息 content 的附件信息）。
+pub async fn upload_file(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Json(input): Json<UploadFileRequest>,
+) -> Result<(StatusCode, Json<Value>), AppError> {
+    use base64::Engine as _;
+
+    let user_id = user_id_of(&auth)?;
+    let name = input.name.trim();
+    if name.is_empty() || name.chars().count() > 200 {
+        return Err(AppError::unprocessable(
+            "IM_VALIDATION",
+            "文件名不合法",
+            vec![FieldError::new("name", "不能为空且不超过 200 字")],
+        ));
+    }
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(input.data_base64.trim())
+        .map_err(|_| {
+            AppError::unprocessable(
+                "IM_VALIDATION",
+                "文件内容不是合法 base64",
+                vec![FieldError::new("dataBase64", "格式错误")],
+            )
+        })?;
+    if data.is_empty() || data.len() > MAX_FILE_BYTES {
+        return Err(AppError::unprocessable(
+            "IM_VALIDATION",
+            "文件大小不合法",
+            vec![FieldError::new(
+                "dataBase64",
+                format!("需在 1 字节到 {}MB 之间", MAX_FILE_BYTES / 1024 / 1024),
+            )],
+        ));
+    }
+    let mime = if input.mime.trim().is_empty() {
+        "application/octet-stream"
+    } else {
+        input.mime.trim()
+    };
+    let model = repo::insert_file(&state.db, user_id, name, mime, data, state.now()).await?;
+    let token = sign_file_token(&state.config.internal_secret, model.id)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "id": model.id,
+            "name": model.name,
+            "mime": model.mime,
+            "size": model.size,
+            "token": token,
+            "url": format!("/api/v1/im/files/{}?token={}", model.id, token),
+        })),
+    ))
+}
+
+/// 媒体下载查询参数。
+#[derive(Debug, Deserialize)]
+pub struct FileTokenQuery {
+    /// 签名。
+    pub token: String,
+}
+
+/// `GET /files/{id}?token=`：按签名下载媒体（`<img>` 可直接引用）。
+pub async fn download_file(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+    Query(query): Query<FileTokenQuery>,
+) -> Result<Response, AppError> {
+    let validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+    let decoded = jsonwebtoken::decode::<FileTokenClaims>(
+        &query.token,
+        &jsonwebtoken::DecodingKey::from_secret(state.config.internal_secret.as_bytes()),
+        &validation,
+    )
+    .map_err(|_| AppError::unauthorized("AUTH_INVALID_TOKEN", "下载链接无效或已过期"))?;
+    if decoded.claims.sub != id.to_string() {
+        return Err(AppError::unauthorized(
+            "AUTH_INVALID_TOKEN",
+            "下载链接与文件不匹配",
+        ));
+    }
+    let file = repo::find_file(&state.db, id)
+        .await?
+        .ok_or_else(|| AppError::not_found("IM_FILE_NOT_FOUND", "文件不存在"))?;
+    let filename = file.name.replace(['"', '\n', '\r'], "");
+    Ok((
+        [
+            (header::CONTENT_TYPE, file.mime),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{filename}\""),
+            ),
+            (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
+        ],
+        file.data,
+    )
+        .into_response())
+}
+
 /// 编辑消息请求。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1084,6 +1225,8 @@ pub fn router() -> Router<SharedState> {
             get(search_in_conversation),
         )
         .route("/search/messages", get(search_messages))
+        .route("/uploads", post(upload_file))
+        .route("/files/{id}", get(download_file))
         .route("/conversations/{id}/notify", post(set_notify_level))
         .route("/conversations/{id}/typing", post(typing_heartbeat))
         .route("/conversations/{id}/read", post(mark_read))

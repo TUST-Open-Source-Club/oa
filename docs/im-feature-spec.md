@@ -155,3 +155,15 @@
   或消息含 `@所有人` 时提醒（`domain::should_notify`，含单测）；
 - 前端：会话右键菜单「通知」三项（全部 / 仅 @我 / 静音），当前项打勾；
 - 用例：`services/im/tests/notify_level_flow.rs`（2 条）。
+
+### 7.9 媒体消息（已完成）
+
+- 迁移 v9：`im_files(id, uploader_id, name, mime, size, data bytea, created_at)`，
+  小文件（≤5MB）存库，避免 IM 依赖额外对象存储；大文件仍走 drive；
+- `POST /uploads`（JSON `{name, mime, dataBase64}`）上传，返回附件元数据 + 签名 URL；
+- `GET /files/{id}?token=` 用 HS256（服务内部密钥，1 小时）签名下载，**不需要 Authorization**，
+  便于 `<img>`/`<a download>` 直接引用；签名与文件 ID 不匹配 401；
+- 消息 `type` 为 `image`/`file`，`content.attachments` 保存附件元数据，随消息与历史回读；
+- 前端：输入框回形针按钮选择文件（≤4MB 提前拦截），图片消息在气泡内直接渲染，
+  其他附件显示为可下载文件名卡片；BFF 新增 `/api/im/files/[id]` 转发签名下载；
+- 用例：`services/im/tests/media_flow.rs`（3 条：上传/签名下载/越权签名/校验、图片消息回读）。

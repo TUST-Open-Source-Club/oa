@@ -15,7 +15,7 @@ interface MessageItem {
   seq: number
   senderId: string | null
   type: string
-  content: { text?: string }
+  content: { text?: string; attachments?: AttachmentItem[] }
   mentions?: string[]
   replyToId?: string | null
   threadRootId?: string | null
@@ -24,6 +24,15 @@ interface MessageItem {
   status?: string
   editedAt?: string | null
   createdAt: string
+}
+/** 附件（上传后返回的元数据 + 签名 URL）。 */
+interface AttachmentItem {
+  id: string
+  name: string
+  mime: string
+  size: number
+  token: string
+  url: string
 }
 /** 表情回应聚合。 */
 interface ReactionItem {
@@ -69,6 +78,8 @@ const users = ref<Record<string, UserItem>>({})
 const text = ref('')
 const error = ref('')
 const sending = ref(false)
+const uploading = ref(false)
+const fileInputEl = ref<HTMLInputElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 const composerEl = ref<HTMLTextAreaElement | null>(null)
 const createOpen = ref(false)
@@ -81,6 +92,71 @@ const mentionIndex = ref(0)
 const pendingMentions = ref<Record<string, string>>({})
 /** 正在引用的消息。 */
 const replyTo = ref<MessageItem | null>(null)
+/** 附件可直接给 <img>/<a> 用的同源地址（走 BFF 转发签名）。 */
+function attachmentSrc(attachment: AttachmentItem) {
+  return attachment.url.replace('/api/v1/im/', '/api/im/')
+}
+
+/** 读取文件为 base64（去掉 data URL 前缀）。 */
+function readBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result ?? '')
+      resolve(result.slice(result.indexOf(',') + 1))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('读取文件失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+/** 选择文件。 */
+function pickFile() {
+  fileInputEl.value?.click()
+}
+
+/** 上传并作为图片/文件消息发送。 */
+async function onFilePicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !activeId.value) return
+  if (file.size === 0) {
+    error.value = '文件为空'
+    return
+  }
+  if (file.size > 4 * 1024 * 1024) {
+    error.value = '文件不能超过 4MB'
+    return
+  }
+  uploading.value = true
+  error.value = ''
+  try {
+    const dataBase64 = await readBase64(file)
+    const attachment = await api<AttachmentItem>('uploads', {
+      method: 'POST',
+      body: {
+        name: file.name,
+        mime: file.type || 'application/octet-stream',
+        dataBase64,
+      },
+    })
+    await api(`conversations/${activeId.value}/messages`, {
+      method: 'POST',
+      body: {
+        type: file.type.startsWith('image/') ? 'image' : 'file',
+        content: { attachments: [attachment] },
+      },
+    })
+    await loadMessages()
+    await loadConversations()
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  } finally {
+    uploading.value = false
+  }
+}
+
 /** 正在输入的成员昵称（不含自己）。 */
 const typingUsers = computed(() => {
   const ids = active.value?.typingUserIds ?? []
@@ -770,6 +846,11 @@ function previewOf(conversation: ConversationItem) {
   const last = conversation.lastMessage
   if (!last) return '暂无消息'
   if (last.type === 'text') return last.content?.text ?? ''
+  if (last.type === 'image') return '[图片]'
+  if (last.type === 'file') {
+    const name = last.content?.attachments?.[0]?.name
+    return name ? `[文件] ${name}` : '[文件]'
+  }
   return `[${last.type}]`
 }
 
@@ -990,7 +1071,31 @@ onUnmounted(() => {
                 >提到了你</span>
               </p>
               <p v-if="message.status === 'recalled'" class="italic opacity-70">该消息已撤回</p>
-              <p v-else class="break-words whitespace-pre-wrap">{{ message.content?.text }}</p>
+              <template v-else>
+                <div v-if="message.content?.attachments?.length" class="mb-1 space-y-1">
+                  <template v-for="attachment in message.content.attachments" :key="attachment.id">
+                    <img
+                      v-if="attachment.mime.startsWith('image/')"
+                      :src="attachmentSrc(attachment)"
+                      :alt="attachment.name"
+                      class="max-h-64 w-auto rounded-[6px]"
+                      loading="lazy"
+                    />
+                    <a
+                      v-else
+                      :href="attachmentSrc(attachment)"
+                      :download="attachment.name"
+                      class="flex items-center gap-1.5 rounded-[4px] bg-black/10 px-1.5 py-1 text-[11px] underline-offset-2 hover:underline dark:bg-white/10"
+                    >
+                      <AppIcon name="doc" class="size-3.5 shrink-0" />
+                      <span class="truncate">{{ attachment.name }}</span>
+                    </a>
+                  </template>
+                </div>
+                <p v-if="message.content?.text" class="break-words whitespace-pre-wrap">
+                  {{ message.content.text }}
+                </p>
+              </template>
               <button
                 v-if="!message.threadRootId && (message.threadReplyCount ?? 0) > 0"
                 type="button"
@@ -1096,6 +1201,21 @@ onUnmounted(() => {
               @input="onTextInput(); syncPendingMentions()"
               @keydown="onComposerKeydown"
             />
+            <input
+              ref="fileInputEl"
+              type="file"
+              class="hidden"
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+              @change="onFilePicked"
+            />
+            <Button
+              variant="secondary"
+              :disabled="uploading"
+              title="发送图片或文件"
+              @click="pickFile"
+            >
+              <AppIcon name="paperclip" class="size-4" />
+            </Button>
             <Button :disabled="!text.trim() || sending" @click="send">
               <AppIcon name="send" class="size-4" />
             </Button>

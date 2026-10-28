@@ -24,6 +24,8 @@ const paths: Record<string, string> = {
   bolt: 'M13 3 5 14h6l-1 7 8-11h-6z',
   reply: 'M9 10 4 15l5 5M4 15h9a7 7 0 0 0 7-7V5',
   close: 'M6 6l12 12M18 6 6 18',
+  paperclip:
+    'M21 11.5 12.5 20a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7-7',
 }
 </script>
 

@@ -231,6 +231,7 @@ pub mod migration5;
 pub mod migration6;
 pub mod migration7;
 pub mod migration8;
+pub mod migration9;
 /// WebSocket 实时通道。
 pub mod realtime;
 pub mod repo;
@@ -254,6 +255,7 @@ pub fn build_router(state: SharedState) -> Router {
         .layer(axum::middleware::from_fn(|req, next| {
             club_auth_sdk::guard::guard_bot_request(req, next, "im")
         }))
+        .layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
