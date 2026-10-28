@@ -468,6 +468,176 @@ pub async fn download_file(
         .into_response())
 }
 
+/// 导出查询参数。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportQuery {
+    /// md（默认）/ html。
+    pub format: Option<String>,
+}
+
+/// Markdown 渲染为 HTML 片段（支持表格、删除线、任务列表）。
+fn render_markdown_html(content: &str) -> String {
+    use pulldown_cmark::{html, Options, Parser};
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_TASKLISTS);
+    let parser = Parser::new_ext(content, options);
+    let mut body = String::new();
+    html::push_html(&mut body, parser);
+    format!(
+        "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n         <title>文档导出</title>\n<style>body{{max-width:820px;margin:40px auto;padding:0 20px;         font:16px/1.75 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1f2937}}         table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #e5e7eb;padding:6px 10px;         text-align:left}}th{{background:#f9fafb}}img{{max-width:100%}}pre{{background:#111827;         color:#e5e7eb;padding:12px 16px;border-radius:6px;overflow:auto}}code{{background:#f3f4f6;         padding:2px 4px;border-radius:4px}}pre code{{background:none;padding:0}}</style>\n</head>\n         <body>\n{body}</body>\n</html>\n"
+    )
+}
+
+/// `GET /spaces/{id}/nodes/{node_id}/export?format=md|html`：导出单篇页面。
+pub async fn export_node(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+    axum::extract::Query(query): axum::extract::Query<ExportQuery>,
+) -> Result<axum::response::Response, AppError> {
+    use axum::response::IntoResponse;
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, space_id, user_id).await?;
+    let model = load_node(&state, space_id, node_id).await?;
+    if model.kind != node::KIND_PAGE {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "仅页面支持导出",
+            vec![FieldError::new("kind", "文件夹不能导出")],
+        ));
+    }
+    let format = query.format.as_deref().unwrap_or("md");
+    let (content_type, body, extension) = match format {
+        "md" => (
+            "text/markdown; charset=utf-8",
+            model.content_md.clone(),
+            "md",
+        ),
+        "html" => (
+            "text/html; charset=utf-8",
+            render_markdown_html(&model.content_md),
+            "html",
+        ),
+        _ => {
+            return Err(AppError::unprocessable(
+                "DOC_VALIDATION",
+                "导出格式不支持",
+                vec![FieldError::new("format", "仅支持 md / html")],
+            ))
+        }
+    };
+    let filename = model.title.replace(['"', '/', '\\', '\n', '\r'], "-");
+    // 文件名可能含中文：主 filename 留 ASCII，UTF-8 名走 RFC 5987
+    let encoded: String = filename
+        .bytes()
+        .map(|byte| format!("%{byte:02X}"))
+        .collect();
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, content_type.to_string()),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!(
+                    "attachment; filename=\"document.{extension}\"; \
+                     filename*=UTF-8''{encoded}.{extension}"
+                ),
+            ),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// 导入 Markdown 请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportRequest {
+    /// 标题（可选，缺省取首个一级标题）。
+    pub title: Option<String>,
+    /// Markdown 正文。
+    pub content_md: String,
+    /// 父节点。
+    pub parent_id: Option<Uuid>,
+}
+
+/// 从 Markdown 里推导标题。
+fn infer_title(content: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("# ")
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .map(str::to_string)
+    })
+}
+
+/// `POST /spaces/{id}/import`：导入 Markdown 为页面。
+pub async fn import_markdown(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(space_id): Path<Uuid>,
+    Json(input): Json<ImportRequest>,
+) -> Result<(StatusCode, Json<NodeDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_editor(&state.db, space_id, user_id).await?;
+    if input.content_md.trim().is_empty() {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "正文不能为空",
+            vec![FieldError::new("contentMd", "不能为空")],
+        ));
+    }
+    if input.content_md.chars().count() > 500_000 {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "正文过大",
+            vec![FieldError::new("contentMd", "不超过 50 万字")],
+        ));
+    }
+    let title = input
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(str::to_string)
+        .or_else(|| infer_title(&input.content_md))
+        .unwrap_or_else(|| "未命名文档".to_string());
+    if title.chars().count() > 255 {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "标题过长",
+            vec![FieldError::new("title", "不超过 255 字")],
+        ));
+    }
+    if let Some(parent_id) = input.parent_id {
+        let parent = repo::find_node(&state.db, parent_id)
+            .await?
+            .filter(|item| item.space_id == space_id && item.deleted_at.is_none())
+            .ok_or_else(|| AppError::not_found("DOC_NODE_NOT_FOUND", "父节点不存在"))?;
+        if parent.kind != node::KIND_FOLDER {
+            return Err(AppError::unprocessable(
+                "DOC_VALIDATION",
+                "父节点必须是文件夹",
+                vec![FieldError::new("parentId", "必须是文件夹")],
+            ));
+        }
+    }
+    let model = repo::create_page_with_content(
+        &state.db,
+        space_id,
+        input.parent_id,
+        &title,
+        &input.content_md,
+        user_id,
+        state.now(),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(NodeDto::from(&model))))
+}
+
 /// 搜索参数。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -970,6 +1140,8 @@ pub fn router() -> Router<SharedState> {
         )
         .route("/public/{token}", get(public_doc))
         .route("/search", get(search_docs))
+        .route("/spaces/{id}/nodes/{node_id}/export", get(export_node))
+        .route("/spaces/{id}/import", post(import_markdown))
         .route("/uploads", post(upload_file))
         .route("/files/{id}", get(download_file))
 }

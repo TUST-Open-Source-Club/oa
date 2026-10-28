@@ -77,7 +77,13 @@ async fn create_space(app: &TestApp, token: &str) -> String {
         .to_string()
 }
 
-async fn create_node(app: &TestApp, token: &str, space_id: &str, kind: &str, title: &str) -> String {
+async fn create_node(
+    app: &TestApp,
+    token: &str,
+    space_id: &str,
+    kind: &str,
+    title: &str,
+) -> String {
     let response = request(
         &app.app,
         "POST",

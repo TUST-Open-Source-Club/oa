@@ -75,6 +75,8 @@ const moveOpen = ref(false)
 const moveTarget = ref<NodeItem | null>(null)
 const moveParent = ref('')
 
+const moreOpen = ref(false)
+const importInputEl = ref<HTMLInputElement | null>(null)
 const searchResults = ref<SearchHit[]>([])
 const searching = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | undefined
@@ -305,6 +307,60 @@ async function openSearchHit(hit: SearchHit) {
   await openPage({ id: hit.id, parentId: null, kind: 'page', title: hit.title, version: 0 })
   keyword.value = ''
   searchResults.value = []
+}
+
+/** 导出当前文档（md / html）。 */
+async function exportDoc(format: 'md' | 'html') {
+  moreOpen.value = false
+  if (!current.value) return
+  errorMessage.value = ''
+  try {
+    const blob = await $fetch<Blob>(
+      `/api/doc/spaces/${spaceId.value}/nodes/${current.value.id}/export`,
+      { params: { format }, headers: auth.authHeaders(), responseType: 'blob' },
+    )
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${current.value.title}.${format}`
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error, '导出失败')
+  }
+}
+
+/** 选择 Markdown 文件导入。 */
+function pickImport() {
+  moreOpen.value = false
+  importInputEl.value?.click()
+}
+
+/** 导入 Markdown 为页面并打开。 */
+async function onImportPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !spaceId.value) return
+  errorMessage.value = ''
+  try {
+    const contentMd = await file.text()
+    const title = file.name.replace(/\.(md|markdown|txt)$/i, '')
+    const created = await api<{ id: string; title: string }>(
+      `spaces/${spaceId.value}/import`,
+      { method: 'POST', body: { title, contentMd } },
+    )
+    await loadTree()
+    await openPage({
+      id: created.id,
+      parentId: null,
+      kind: 'page',
+      title: created.title,
+      version: 1,
+    })
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error, '导入失败')
+  }
 }
 
 /** 打开分享设置。 */
@@ -820,9 +876,43 @@ onUnmounted(() => {
               <Button size="sm" variant="secondary" @click="cancelEdit">取消</Button>
               <Button size="sm" :loading="saving" @click="save">保存</Button>
             </template>
-            <template v-else>
+<template v-else>
               <Button size="sm" variant="secondary" @click="openShare">分享</Button>
               <Button size="sm" @click="editing = true">编辑</Button>
+              <div class="relative">
+                <button
+                  class="rounded-[var(--radius-field)] p-1 text-neutral-400 transition hover:bg-[var(--surface-hover)] hover:text-neutral-600"
+                  aria-label="更多"
+                  @click.stop="moreOpen = !moreOpen"
+                >
+                  <AppIcon name="menu" class="size-4" />
+                </button>
+                <div
+                  v-if="moreOpen"
+                  class="absolute right-0 z-40 mt-1 w-40 overflow-hidden rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] py-1 text-[13px] shadow-[var(--shadow-pop)]"
+                  @click.stop
+                >
+                  <button
+                    class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+                    @click="exportDoc('md')"
+                  >导出 Markdown</button>
+                  <button
+                    class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+                    @click="exportDoc('html')"
+                  >导出 HTML</button>
+                  <button
+                    class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+                    @click="pickImport"
+                  >导入 Markdown</button>
+                </div>
+              </div>
+              <input
+                ref="importInputEl"
+                type="file"
+                accept=".md,.markdown,.txt"
+                class="hidden"
+                @change="onImportPicked"
+              />
             </template>
           </div>
         </div>

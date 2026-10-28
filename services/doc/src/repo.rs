@@ -596,3 +596,48 @@ pub async fn find_file(
         .await
         .map_err(map_db_err)
 }
+
+/// 导入 Markdown：直接以内容创建页面（version 1）。
+pub async fn create_page_with_content(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    parent_id: Option<Uuid>,
+    title: &str,
+    content: &str,
+    user_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<node::Model, AppError> {
+    let max_position: Option<i64> = node::Entity::find()
+        .filter(node::Column::SpaceId.eq(space_id))
+        .filter(match parent_id {
+            Some(parent) => node::Column::ParentId.eq(parent),
+            None => node::Column::ParentId.is_null(),
+        })
+        .order_by_desc(node::Column::Position)
+        .one(db)
+        .await
+        .map_err(map_db_err)?
+        .map(|row| row.position);
+    node::ActiveModel {
+        id: Set(new_id()),
+        space_id: Set(space_id),
+        parent_id: Set(parent_id),
+        kind: Set(node::KIND_PAGE.to_string()),
+        title: Set(title.to_string()),
+        position: Set(max_position.unwrap_or(0) + 1),
+        version: Set(1),
+        content_md: Set(content.to_string()),
+        updated_by: Set(user_id),
+        visibility: Set("space".to_string()),
+        share_token: Set(None),
+        share_password_hash: Set(None),
+        share_expires_at: Set(None),
+        share_permission: Set(None),
+        deleted_at: Set(None),
+        created_at: Set(now.fixed_offset()),
+        updated_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}

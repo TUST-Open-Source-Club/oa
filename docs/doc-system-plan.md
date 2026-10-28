@@ -7,7 +7,7 @@
 - [x] 目录树操作：重命名 / 移动 / 同级上移下移 / 软删（整棵子树）；面包屑已有
 - [x] 文档级可见性与分享：`private / space`，分享链接（token + 可选密码 + 有效期 + 只读）
 - [x] 搜索：标题 + 正文 `pg_trgm`，范围 = 我可读的空间
-- [ ] 导出 / 导入：Markdown、HTML；导入单篇 Markdown
+- [x] 导出 / 导入：Markdown、HTML；导入单篇 Markdown
 - [x] 编辑器增强：自动保存（4s 防抖）+ 冲突提示、字数统计、图片粘贴上传、表格渲染（GFM）
 
 ## P1 · 协作
@@ -42,8 +42,8 @@ POST   /spaces/{id}/nodes/{node_id}/restore 恢复整棵子树                  
 POST   /spaces/{id}/nodes/{node_id}/share   ✅
 GET    /public/{token}                        ✅
 GET    /search?q=                        ✅
-GET    /spaces/{id}/nodes/{node_id}/export?format=md|html
-POST   /spaces/{id}/import
+GET    /spaces/{id}/nodes/{node_id}/export?format=md|html  ✅
+POST   /spaces/{id}/import                                  ✅
 GET/POST /spaces/{id}/nodes/{node_id}/comments
 PATCH  /comments/{id}
 POST   /spaces/{id}/nodes/{node_id}/star
@@ -118,3 +118,18 @@ viewer 自动排除 `private`，已删除不出现，按更新时间倒序，返
 
 测试：`services/doc/tests/uploads_flow.rs` 3 条。
 截图：`docs/ui-preview/docs-editor-table.png`。
+
+## 已完成（P0 第 5 项 · 导出 / 导入）
+
+- `GET /spaces/{id}/nodes/{nodeId}/export?format=md|html`：成员可导出单篇页面；
+  md 原样返回，html 用 `pulldown-cmark`（表格/删除线/任务列表）渲染成独立 HTML 文件；
+  文件名按 RFC 5987 编码（中文名可下载）；文件夹 422、非法格式 422、非成员 403。
+- `POST /spaces/{id}/import`：编辑者导入 Markdown 建页，标题可显式给或取首个 `# 标题`，
+  缺省“未命名文档”；正文非空且 ≤50 万字；父级必须是文件夹。
+- 前端：文档顶栏「更多」菜单（导出 Markdown / 导出 HTML / 导入 Markdown），
+  导入后自动打开新页面。
+
+测试：`services/doc/tests/export_import_flow.rs` 4 条。
+截图：`docs/ui-preview/docs-export-import.png`。
+
+**P0 全部完成。** 下一步进入 P1：块级评论（回复 / 解决，`@` 接 notify）、版本 diff、关注通知、权限细化。
