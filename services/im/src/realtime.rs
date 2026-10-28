@@ -295,6 +295,30 @@ pub async fn broadcast_edited(state: &SharedState, conversation_id: Uuid, model:
     }
 }
 
+/// 广播消息表情回应变化。
+pub async fn broadcast_reactions(
+    state: &SharedState,
+    conversation_id: Uuid,
+    message_id: Uuid,
+    groups: &[repo::ReactionGroup],
+) {
+    let Ok(members) = repo::list_members(&state.db, conversation_id).await else {
+        return;
+    };
+    let reactions: Vec<Value> = groups
+        .iter()
+        .map(|group| json!({ "emoji": group.emoji, "count": group.count }))
+        .collect();
+    let event = json!({
+        "type": "message_reactions",
+        "payload": { "conversationId": conversation_id, "messageId": message_id, "reactions": reactions }
+    })
+    .to_string();
+    for member in members {
+        state.hub.send_to(member.user_id, &event);
+    }
+}
+
 /// 构造错误 envelope。
 fn error_message(request_id: Option<&str>, code: &str, message: &str) -> String {
     json!({

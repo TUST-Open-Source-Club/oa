@@ -188,3 +188,31 @@ pub mod message_revision {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// 消息表情回应。
+pub mod message_reaction {
+    use sea_orm::entity::prelude::*;
+
+    /// 回应记录（消息 + 用户 + 表情 联合主键）。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "message_reactions")]
+    pub struct Model {
+        /// 消息 ID。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub message_id: Uuid,
+        /// 回应用户。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub user_id: Uuid,
+        /// 表情（原样存储，长度受限）。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub emoji: String,
+        /// 回应时间。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}

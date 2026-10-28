@@ -20,9 +20,16 @@ interface MessageItem {
   replyToId?: string | null
   threadRootId?: string | null
   threadReplyCount?: number
+  reactions?: ReactionItem[]
   status?: string
   editedAt?: string | null
   createdAt: string
+}
+/** 表情回应聚合。 */
+interface ReactionItem {
+  emoji: string
+  count: number
+  mine: boolean
 }
 /** 编辑历史版本。 */
 interface RevisionRow {
@@ -72,6 +79,9 @@ const mentionIndex = ref(0)
 const pendingMentions = ref<Record<string, string>>({})
 /** 正在引用的消息。 */
 const replyTo = ref<MessageItem | null>(null)
+/** 快捷表情。 */
+const QUICK_REACTIONS = ['👍', '🎉', '❤️', '😄', '👀']
+const reactionPending = ref(false)
 /** 线程面板根消息与回复。 */
 const threadRoot = ref<MessageItem | null>(null)
 const threadReplies = ref<MessageItem[]>([])
@@ -486,6 +496,25 @@ function jumpToMessage(id?: string | null) {
   setTimeout(() => el.classList.remove('ring-2', 'ring-primary-500/50'), 1200)
 }
 
+/** 切换表情回应（服务端返回该消息最新聚合）。 */
+async function toggleReaction(message: MessageItem, emoji: string) {
+  if (reactionPending.value) return
+  reactionPending.value = true
+  error.value = ''
+  try {
+    const result = await api<{ reactions: ReactionItem[] }>(
+      `conversations/${activeId.value}/messages/${message.id}/reactions`,
+      { method: 'POST', body: { emoji } },
+    )
+    message.reactions = result.reactions
+    closeMenus()
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  } finally {
+    reactionPending.value = false
+  }
+}
+
 /** 打开线程面板（线程回复定位到其根）。 */
 async function openThread(message: MessageItem) {
   closeMenus()
@@ -802,6 +831,28 @@ onUnmounted(() => {
               >
                 已编辑
               </button>
+              <div v-if="message.reactions?.length" class="mt-1 flex flex-wrap gap-1">
+                <button
+                  v-for="reaction in message.reactions"
+                  :key="reaction.emoji"
+                  type="button"
+                  class="flex items-center gap-0.5 rounded-full border px-1.5 text-[10px] leading-4 transition"
+                  :class="
+                    message.senderId === auth.user?.id
+                      ? reaction.mine
+                        ? 'border-white/60 bg-white/25 text-white'
+                        : 'border-transparent bg-white/10 text-white/90 hover:bg-white/20'
+                      : reaction.mine
+                        ? 'border-primary-400/70 bg-primary-500/15 text-primary-700 dark:text-primary-200'
+                        : 'border-transparent bg-black/[0.05] text-neutral-600 hover:bg-black/[0.08] dark:bg-white/[0.08] dark:text-neutral-300'
+                  "
+                  :title="`${reaction.emoji} ${reaction.count} 人`"
+                  @click.stop="toggleReaction(message, reaction.emoji)"
+                >
+                  <span>{{ reaction.emoji }}</span>
+                  <span>{{ reaction.count }}</span>
+                </button>
+              </div>
             </div>
           </div>
           <p v-if="messages.length === 0" class="py-10 text-center text-[11px] text-neutral-400">
@@ -956,10 +1007,25 @@ onUnmounted(() => {
     <!-- 消息右键菜单 -->
     <div
       v-if="msgMenu.open && msgMenu.message"
-      class="fixed z-50 w-36 overflow-hidden rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] py-1 text-[13px] shadow-[var(--shadow-pop)]"
+      class="fixed z-50 w-44 overflow-hidden rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] py-1 text-[13px] shadow-[var(--shadow-pop)]"
       :style="{ left: `${msgMenu.x}px`, top: `${msgMenu.y}px` }"
       @click.stop
     >
+      <div
+        v-if="msgMenu.message.status !== 'recalled'"
+        class="flex items-center gap-0.5 border-b border-[var(--border)] px-2 pb-1.5 pt-1"
+      >
+        <button
+          v-for="emoji in QUICK_REACTIONS"
+          :key="emoji"
+          type="button"
+          class="rounded px-1 text-[15px] leading-6 transition hover:bg-[var(--surface-hover)]"
+          :title="`回应 ${emoji}`"
+          @click="toggleReaction(msgMenu.message!, emoji)"
+        >
+          {{ emoji }}
+        </button>
+      </div>
       <button
         v-if="msgMenu.message.status !== 'recalled'"
         class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"

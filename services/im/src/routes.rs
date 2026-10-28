@@ -65,6 +65,8 @@ pub struct MessageDto {
     pub thread_root_id: Option<String>,
     /// 线程回复数（仅根消息有意义）。
     pub thread_reply_count: i64,
+    /// 表情回应聚合。
+    pub reactions: Vec<ReactionDto>,
     /// 编辑时间。
     pub edited_at: Option<DateTime<FixedOffset>>,
     /// 时间。
@@ -93,10 +95,35 @@ impl From<&message::Model> for MessageDto {
                 .unwrap_or_default(),
             thread_root_id: model.thread_root_id.map(|id| id.to_string()),
             thread_reply_count: 0,
+            reactions: Vec::new(),
             edited_at: model.edited_at.map(|t| t.fixed_offset()),
             created_at: model.created_at,
         }
     }
+}
+
+/// 表情回应聚合 DTO。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactionDto {
+    /// 表情。
+    pub emoji: String,
+    /// 回应人数。
+    pub count: i64,
+    /// 当前用户是否回应过。
+    pub mine: bool,
+}
+
+/// 把聚合结果转成 DTO（`mine` 按调用者判定）。
+fn reaction_dtos(groups: &[repo::ReactionGroup], viewer: Uuid) -> Vec<ReactionDto> {
+    groups
+        .iter()
+        .map(|group| ReactionDto {
+            emoji: group.emoji.clone(),
+            count: group.count,
+            mine: group.user_ids.contains(&viewer),
+        })
+        .collect()
 }
 
 /// 会话 DTO。
@@ -280,12 +307,17 @@ pub async fn list_messages(
     let items = repo::list_messages(&state.db, conversation_id, query.before_seq, limit).await?;
     let root_ids: Vec<Uuid> = items.iter().map(|item| item.id).collect();
     let counts = repo::thread_reply_counts(&state.db, conversation_id, &root_ids).await?;
+    let reactions = repo::reactions_for_messages(&state.db, &root_ids).await?;
     Ok(Json(
         items
             .iter()
             .map(|item| {
                 let mut dto = MessageDto::from(item);
                 dto.thread_reply_count = counts.get(&item.id).copied().unwrap_or(0);
+                dto.reactions = reaction_dtos(
+                    reactions.get(&item.id).map(Vec::as_slice).unwrap_or(&[]),
+                    user_id,
+                );
                 dto
             })
             .collect(),
@@ -865,7 +897,51 @@ pub async fn list_thread(
         .await?
         .ok_or_else(|| AppError::not_found("IM_MESSAGE_NOT_FOUND", "消息不存在"))?;
     let replies = repo::list_thread_messages(&state.db, conversation_id, message_id).await?;
-    Ok(Json(replies.iter().map(MessageDto::from).collect()))
+    let ids: Vec<Uuid> = replies.iter().map(|item| item.id).collect();
+    let reactions = repo::reactions_for_messages(&state.db, &ids).await?;
+    Ok(Json(
+        replies
+            .iter()
+            .map(|item| {
+                let mut dto = MessageDto::from(item);
+                dto.reactions = reaction_dtos(
+                    reactions.get(&item.id).map(Vec::as_slice).unwrap_or(&[]),
+                    user_id,
+                );
+                dto
+            })
+            .collect(),
+    ))
+}
+
+/// 表情回应请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactionRequest {
+    /// 表情。
+    pub emoji: String,
+}
+
+/// `POST /conversations/{id}/messages/{message_id}/reactions`：切换表情回应。
+pub async fn toggle_reaction(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((conversation_id, message_id)): Path<(Uuid, Uuid)>,
+    Json(input): Json<ReactionRequest>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let groups = crate::service::toggle_reaction(
+        &state,
+        user_id,
+        conversation_id,
+        message_id,
+        &input.emoji,
+    )
+    .await?;
+    crate::realtime::broadcast_reactions(&state, conversation_id, message_id, &groups).await;
+    Ok(Json(
+        json!({ "reactions": reaction_dtos(&groups, user_id) }),
+    ))
 }
 
 /// `/api/v1/im` 路由。
@@ -890,6 +966,10 @@ pub fn router() -> Router<SharedState> {
         .route(
             "/conversations/{id}/messages/{message_id}/thread",
             get(list_thread),
+        )
+        .route(
+            "/conversations/{id}/messages/{message_id}/reactions",
+            post(toggle_reaction),
         )
         .route(
             "/conversations/{id}/messages/{message_id}/recall",

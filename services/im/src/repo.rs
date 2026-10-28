@@ -12,7 +12,7 @@ use uuid::Uuid;
 use club_common::{new_id, AppError};
 
 use crate::domain::unread_of;
-use crate::entity::{conversation, conversation_member, message, message_revision};
+use crate::entity::{conversation, conversation_member, message, message_reaction, message_revision};
 
 /// 将数据库错误映射为统一错误。
 pub fn map_db_err(err: DbErr) -> AppError {
@@ -703,4 +703,79 @@ pub async fn thread_reply_counts(
         *counts.entry(root).or_insert(0) += 1;
     }
     Ok(counts)
+}
+
+/// 一条消息上某个表情的聚合。
+#[derive(Debug, Clone)]
+pub struct ReactionGroup {
+    /// 表情。
+    pub emoji: String,
+    /// 回应人数。
+    pub count: i64,
+    /// 回应用户（用于判断 `mine` 与展示提示）。
+    pub user_ids: Vec<Uuid>,
+}
+
+/// 切换表情回应：已存在则删除，返回是否新增。
+pub async fn toggle_reaction(
+    db: &DatabaseConnection,
+    message_id: Uuid,
+    user_id: Uuid,
+    emoji: &str,
+    now: DateTime<Utc>,
+) -> Result<bool, AppError> {
+    let existing = message_reaction::Entity::find_by_id((message_id, user_id, emoji.to_string()))
+        .one(db)
+        .await
+        .map_err(map_db_err)?;
+    if existing.is_some() {
+        message_reaction::Entity::delete_by_id((message_id, user_id, emoji.to_string()))
+            .exec(db)
+            .await
+            .map_err(map_db_err)?;
+        return Ok(false);
+    }
+    message_reaction::ActiveModel {
+        message_id: Set(message_id),
+        user_id: Set(user_id),
+        emoji: Set(emoji.to_string()),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)?;
+    Ok(true)
+}
+
+/// 批量读取消息的回应聚合（按表情首次出现时间排序）。
+pub async fn reactions_for_messages(
+    db: &DatabaseConnection,
+    message_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, Vec<ReactionGroup>>, AppError> {
+    let mut grouped: std::collections::HashMap<Uuid, Vec<ReactionGroup>> =
+        std::collections::HashMap::new();
+    if message_ids.is_empty() {
+        return Ok(grouped);
+    }
+    let rows = message_reaction::Entity::find()
+        .filter(message_reaction::Column::MessageId.is_in(message_ids.to_vec()))
+        .order_by_asc(message_reaction::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)?;
+    for row in rows {
+        let groups = grouped.entry(row.message_id).or_default();
+        match groups.iter_mut().find(|group| group.emoji == row.emoji) {
+            Some(group) => {
+                group.count += 1;
+                group.user_ids.push(row.user_id);
+            }
+            None => groups.push(ReactionGroup {
+                emoji: row.emoji,
+                count: 1,
+                user_ids: vec![row.user_id],
+            }),
+        }
+    }
+    Ok(grouped)
 }

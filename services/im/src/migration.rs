@@ -281,6 +281,7 @@ impl MigratorTrait for Migrator {
             Box::new(crate::migration3::Migration),
             Box::new(crate::migration4::Migration),
             Box::new(crate::migration5::Migration),
+            Box::new(crate::migration6::Migration),
         ]
     }
 }

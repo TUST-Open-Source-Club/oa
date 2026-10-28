@@ -109,3 +109,11 @@
 - `GET /conversations/{cid}/messages/{mid}/thread` 返回该根的全部回复（按 `seq` 升序，仅成员可读）；
 - 前端：根消息显示「N 条回复」，右侧线程面板展示根预览 + 回复列表 + 回复输入框，会话列表展示回复数；
 - 用例：`services/im/tests/thread_flow.rs`（4 条：隐藏与计数、跨会话/不存在根、嵌套拒绝、成员权限）。
+
+### 7.4 表情回应（已完成）
+
+- `message_reactions(message_id, user_id, emoji, created_at)`，联合主键，点第二次即取消；
+- `POST /conversations/{cid}/messages/{mid}/reactions`（body `{emoji}`）切换并返回聚合 `[{emoji, count, mine}]`；
+- 消息列表与线程回复都带 `reactions`；仅成员可回应，已撤回消息 400，空/含空白 emoji 422；
+- WS 广播 `message_reactions`；前端气泡下展示表情胶囊（自己回应过高亮），右键菜单提供快捷表情；
+- 用例：`services/im/tests/reactions_flow.rs`（3 条）。

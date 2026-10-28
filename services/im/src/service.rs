@@ -231,3 +231,37 @@ pub async fn message_revisions(
         .ok_or_else(|| AppError::not_found("IM_MESSAGE_NOT_FOUND", "消息不存在"))?;
     repo::list_revisions(&state.db, message_id).await
 }
+
+/// 表情的最大字节数（含变体选择符，够用即可）。
+pub const MAX_EMOJI_BYTES: usize = 32;
+
+/// 切换表情回应，返回该消息的最新聚合。
+pub async fn toggle_reaction(
+    state: &SharedState,
+    user_id: Uuid,
+    conversation_id: Uuid,
+    message_id: Uuid,
+    emoji: &str,
+) -> Result<Vec<repo::ReactionGroup>, AppError> {
+    let emoji = emoji.trim();
+    if emoji.is_empty() || emoji.len() > MAX_EMOJI_BYTES || emoji.chars().any(char::is_whitespace) {
+        return Err(AppError::unprocessable(
+            "IM_VALIDATION",
+            "表情不合法",
+            vec![FieldError::new("emoji", "不能为空且不能含空白")],
+        ));
+    }
+    repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
+    let model = repo::find_message(&state.db, conversation_id, message_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("IM_MESSAGE_NOT_FOUND", "消息不存在"))?;
+    if model.status == "recalled" {
+        return Err(AppError::bad_request(
+            "IM_MESSAGE_RECALLED",
+            "已撤回的消息不能回应",
+        ));
+    }
+    repo::toggle_reaction(&state.db, message_id, user_id, emoji, state.now()).await?;
+    let mut grouped = repo::reactions_for_messages(&state.db, &[message_id]).await?;
+    Ok(grouped.remove(&message_id).unwrap_or_default())
+}
