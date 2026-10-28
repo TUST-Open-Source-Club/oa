@@ -17,6 +17,15 @@ interface MessageItem {
   type: string
   content: { text?: string }
   mentions?: string[]
+  status?: string
+  editedAt?: string | null
+  createdAt: string
+}
+/** 编辑历史版本。 */
+interface RevisionRow {
+  version: number
+  content: { text?: string }
+  editorId: string | null
   createdAt: string
 }
 /** 会话条目。 */
@@ -71,6 +80,13 @@ const convMenu = reactive<{ open: boolean; x: number; y: number; conversation: C
   conversation: null,
 })
 const membersOpen = ref(false)
+const editOpen = ref(false)
+const editText = ref('')
+const editTarget = ref<MessageItem | null>(null)
+const savingEdit = ref(false)
+const historyOpen = ref(false)
+const historyRows = ref<RevisionRow[]>([])
+const historyLoading = ref(false)
 const members = ref<MemberRow[]>([])
 const groupSettings = reactive({ onlyAdminsSpeak: false, notice: '' })
 const myRole = computed(() => members.value.find((row) => row.userId === auth.user?.id)?.role ?? 'member')
@@ -419,6 +435,56 @@ async function recallMessage(message: MessageItem) {
   }
 }
 
+/** 打开编辑弹窗（仅自己的文本消息）。 */
+function openEdit(message: MessageItem) {
+  closeMenus()
+  if (message.senderId !== auth.user?.id || message.type !== 'text' || message.status === 'recalled') return
+  editTarget.value = message
+  editText.value = message.content?.text ?? ''
+  editOpen.value = true
+}
+
+/** 保存编辑（服务端写版本历史并标记 editedAt）。 */
+async function saveEdit() {
+  const target = editTarget.value
+  const content = editText.value.trim()
+  if (!target || !content || savingEdit.value) return
+  savingEdit.value = true
+  error.value = ''
+  try {
+    await api(`conversations/${activeId.value}/messages/${target.id}`, {
+      method: 'PATCH',
+      body: { content: { text: content } },
+    })
+    editOpen.value = false
+    await loadMessages(false)
+    await loadConversations()
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  } finally {
+    savingEdit.value = false
+  }
+}
+
+/** 打开编辑历史（版本倒序，最新在前）。 */
+async function openHistory(message: MessageItem) {
+  closeMenus()
+  historyOpen.value = true
+  historyRows.value = []
+  historyLoading.value = true
+  error.value = ''
+  try {
+    historyRows.value = await api<RevisionRow[]>(
+      `conversations/${activeId.value}/messages/${message.id}/revisions`,
+    )
+    await resolveUsers(historyRows.value.map((row) => row.editorId ?? ''))
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
 /** 会话标记已读。 */
 async function markConversationRead(conversation: ConversationItem) {
   const seq = conversation.lastMessage?.seq ?? 0
@@ -586,7 +652,17 @@ onUnmounted(() => {
                   class="rounded bg-white/20 px-1 text-[10px] not-italic"
                 >提到了你</span>
               </p>
-              <p class="break-words whitespace-pre-wrap">{{ message.content?.text }}</p>
+              <p v-if="message.status === 'recalled'" class="italic opacity-70">该消息已撤回</p>
+              <p v-else class="break-words whitespace-pre-wrap">{{ message.content?.text }}</p>
+              <button
+                v-if="message.editedAt"
+                type="button"
+                class="mt-0.5 block text-[10px] not-italic opacity-70 underline-offset-2 hover:underline"
+                title="查看编辑历史"
+                @click.stop="openHistory(message)"
+              >
+                已编辑
+              </button>
             </div>
           </div>
           <p v-if="messages.length === 0" class="py-10 text-center text-[11px] text-neutral-400">
@@ -659,6 +735,20 @@ onUnmounted(() => {
         复制文本
       </button>
       <button
+        v-if="msgMenu.message.senderId === auth.user?.id && msgMenu.message.type === 'text' && msgMenu.message.status !== 'recalled'"
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="openEdit(msgMenu.message!)"
+      >
+        编辑
+      </button>
+      <button
+        v-if="msgMenu.message.editedAt"
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="openHistory(msgMenu.message!)"
+      >
+        编辑历史
+      </button>
+      <button
         v-if="msgMenu.message.senderId === auth.user?.id || isGroupAdmin"
         class="block w-full px-3 py-1.5 text-left text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-500/10"
         @click="recallMessage(msgMenu.message!)"
@@ -666,6 +756,55 @@ onUnmounted(() => {
         撤回
       </button>
     </div>
+
+    <!-- 编辑消息 -->
+    <AppModal :open="editOpen" title="编辑消息" width="max-w-lg" @close="editOpen = false">
+      <textarea
+        v-model="editText"
+        rows="3"
+        class="w-full resize-none rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-2 text-[13px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+        @keydown.meta.enter.prevent="saveEdit"
+        @keydown.ctrl.enter.prevent="saveEdit"
+      />
+      <p class="mt-1.5 text-[11px] text-neutral-400">编辑后原内容会保留在历史版本中</p>
+      <template #footer>
+        <Button variant="secondary" @click="editOpen = false">取消</Button>
+        <Button :disabled="!editText.trim() || savingEdit" @click="saveEdit">保存</Button>
+      </template>
+    </AppModal>
+
+    <!-- 编辑历史 -->
+    <AppModal :open="historyOpen" title="编辑历史" width="max-w-lg" @close="historyOpen = false">
+      <p v-if="historyLoading" class="py-6 text-center text-[12px] text-neutral-400">加载中…</p>
+      <p v-else-if="historyRows.length === 0" class="py-6 text-center text-[12px] text-neutral-400">
+        这条消息还没有历史版本
+      </p>
+      <ol v-else class="space-y-2">
+        <li
+          v-for="(row, index) in historyRows"
+          :key="row.version"
+          class="rounded-[var(--radius-field)] border border-[var(--border)] p-2.5"
+        >
+          <div class="mb-1 flex items-center justify-between gap-2 text-[11px] text-neutral-500">
+            <span class="flex min-w-0 items-center gap-1">
+              <span class="shrink-0">v{{ row.version }}</span>
+              <span class="truncate">{{ users[row.editorId ?? '']?.nickname ?? '已注销用户' }}</span>
+              <span
+                v-if="index === 0"
+                class="shrink-0 rounded bg-primary-50 px-1 text-[10px] text-primary-700 dark:bg-primary-900/40 dark:text-primary-200"
+              >当前</span>
+            </span>
+            <span class="shrink-0">{{ timeOf(row.createdAt) }}</span>
+          </div>
+          <p class="break-words whitespace-pre-wrap text-[13px] text-[var(--text-strong)]">
+            {{ row.content?.text }}
+          </p>
+        </li>
+      </ol>
+      <template #footer>
+        <Button variant="secondary" @click="historyOpen = false">关闭</Button>
+      </template>
+    </AppModal>
 
     <!-- 群设置 -->
     <AppModal :open="membersOpen" title="群设置" width="max-w-lg" @close="membersOpen = false">

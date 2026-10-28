@@ -213,21 +213,14 @@ async fn non_sender_cannot_edit_others_message() {
     let owner_token = issue_token(&app, owner);
     let member_token = issue_token(&app, member);
     let outsider_role_token = issue_token(&app, outsider_role);
-    let conversation_id = create_group(
-        &app,
-        &owner_token,
-        &[member, outsider_role],
-        "编辑测试群",
-    )
-    .await;
+    let conversation_id =
+        create_group(&app, &owner_token, &[member, outsider_role], "编辑测试群").await;
 
     // 群主把成员设为管理员，管理员也不能改别人的消息
     request(
         &app.app,
         "POST",
-        &format!(
-            "/api/v1/im/conversations/{conversation_id}/members/{member}/role"
-        ),
+        &format!("/api/v1/im/conversations/{conversation_id}/members/{member}/role"),
         Some(&owner_token),
         Some(&json!({ "role": "admin" })),
     )
@@ -283,9 +276,7 @@ async fn recalled_message_cannot_be_edited() {
     request(
         &app.app,
         "POST",
-        &format!(
-            "/api/v1/im/conversations/{conversation_id}/messages/{message_id}/recall"
-        ),
+        &format!("/api/v1/im/conversations/{conversation_id}/messages/{message_id}/recall"),
         Some(&owner_token),
         None,
     )

@@ -275,6 +275,21 @@ pub async fn broadcast_message(state: &SharedState, conversation_id: Uuid, model
     }
 }
 
+/// 广播消息编辑后的最新正文。
+pub async fn broadcast_edited(state: &SharedState, conversation_id: Uuid, model: &message::Model) {
+    let Ok(members) = repo::list_members(&state.db, conversation_id).await else {
+        return;
+    };
+    let event = json!({
+        "type": "message_edited",
+        "payload": MessageDto::from(model)
+    })
+    .to_string();
+    for member in members {
+        state.hub.send_to(member.user_id, &event);
+    }
+}
+
 /// 构造错误 envelope。
 fn error_message(request_id: Option<&str>, code: &str, message: &str) -> String {
     json!({

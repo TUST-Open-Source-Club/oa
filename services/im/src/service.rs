@@ -157,3 +157,56 @@ pub async fn read_receipts(
         })
         .collect())
 }
+
+/// 编辑消息（仅发送者本人，返回消息与是否实际改动）。
+///
+/// 内容与当前一致时按幂等处理：不写版本历史、不更新 `edited_at`。
+pub async fn edit_message(
+    state: &SharedState,
+    user_id: Uuid,
+    conversation_id: Uuid,
+    message_id: Uuid,
+    content: &Value,
+) -> Result<(message::Model, bool), AppError> {
+    repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
+    let model = repo::find_message(&state.db, conversation_id, message_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("IM_MESSAGE_NOT_FOUND", "消息不存在"))?;
+    if model.sender_id != Some(user_id) {
+        return Err(AppError::forbidden("IM_FORBIDDEN", "只能编辑自己的消息"));
+    }
+    if model.status == "recalled" {
+        return Err(AppError::bad_request(
+            "IM_MESSAGE_RECALLED",
+            "已撤回的消息不能编辑",
+        ));
+    }
+    domain::validate_message(&model.r#type, content)?;
+    if &model.content == content {
+        return Ok((model, false));
+    }
+    let updated = repo::edit_message_content(
+        &state.db,
+        conversation_id,
+        message_id,
+        content.clone(),
+        user_id,
+        state.now(),
+    )
+    .await?;
+    Ok((updated, true))
+}
+
+/// 读取消息编辑历史（仅会话成员）。
+pub async fn message_revisions(
+    state: &SharedState,
+    user_id: Uuid,
+    conversation_id: Uuid,
+    message_id: Uuid,
+) -> Result<Vec<crate::entity::message_revision::Model>, AppError> {
+    repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
+    repo::find_message(&state.db, conversation_id, message_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("IM_MESSAGE_NOT_FOUND", "消息不存在"))?;
+    repo::list_revisions(&state.db, message_id).await
+}

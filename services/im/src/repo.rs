@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseBackend, DatabaseConnection,
-    DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement,
+    DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement, TransactionTrait,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -12,7 +12,7 @@ use uuid::Uuid;
 use club_common::{new_id, AppError};
 
 use crate::domain::unread_of;
-use crate::entity::{conversation, conversation_member, message};
+use crate::entity::{conversation, conversation_member, message, message_revision};
 
 /// 将数据库错误映射为统一错误。
 pub fn map_db_err(err: DbErr) -> AppError {
@@ -562,4 +562,100 @@ pub async fn dissolve_conversation(
         .await
         .map_err(map_db_err)?;
     Ok(())
+}
+
+/// 列出某条消息的编辑历史（版本倒序）。
+pub async fn list_revisions(
+    db: &DatabaseConnection,
+    message_id: Uuid,
+) -> Result<Vec<message_revision::Model>, AppError> {
+    message_revision::Entity::find()
+        .filter(message_revision::Column::MessageId.eq(message_id))
+        .order_by_desc(message_revision::Column::Version)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 写入一条编辑历史版本。
+async fn insert_revision<C: ConnectionTrait>(
+    conn: &C,
+    message_id: Uuid,
+    version: i32,
+    content: Value,
+    editor_id: Option<Uuid>,
+    created_at: DateTime<Utc>,
+) -> Result<(), AppError> {
+    message_revision::ActiveModel {
+        id: Set(new_id()),
+        message_id: Set(message_id),
+        version: Set(version),
+        content: Set(content),
+        editor_id: Set(editor_id),
+        created_at: Set(created_at.fixed_offset()),
+    }
+    .insert(conn)
+    .await
+    .map(|_| ())
+    .map_err(map_db_err)
+}
+
+/// 编辑消息正文并在同一事务内追加版本历史。
+///
+/// 首次编辑时把原内容补录为 `version=1`（编辑者为发送者、时间为发送时间），
+/// 新正文写入 `version=2`；此后每次编辑版本号递增。消息行的 `edited_at` 同步更新。
+pub async fn edit_message_content(
+    db: &DatabaseConnection,
+    conversation_id: Uuid,
+    message_id: Uuid,
+    content: Value,
+    editor_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<message::Model, AppError> {
+    let txn = db.begin().await.map_err(map_db_err)?;
+    // 锁住消息行，串行化同一消息的并发编辑，避免版本号冲突
+    let model = message::Entity::find()
+        .filter(message::Column::ConversationId.eq(conversation_id))
+        .filter(message::Column::Id.eq(message_id))
+        .lock_exclusive()
+        .one(&txn)
+        .await
+        .map_err(map_db_err)?
+        .ok_or_else(|| AppError::not_found("IM_MESSAGE_NOT_FOUND", "消息不存在"))?;
+    let latest = message_revision::Entity::find()
+        .filter(message_revision::Column::MessageId.eq(message_id))
+        .order_by_desc(message_revision::Column::Version)
+        .one(&txn)
+        .await
+        .map_err(map_db_err)?;
+    let next_version = match latest {
+        Some(row) => row.version + 1,
+        None => {
+            insert_revision(
+                &txn,
+                message_id,
+                1,
+                model.content.clone(),
+                model.sender_id,
+                model.created_at.with_timezone(&Utc),
+            )
+            .await?;
+            2
+        }
+    };
+    insert_revision(
+        &txn,
+        message_id,
+        next_version,
+        content.clone(),
+        Some(editor_id),
+        now,
+    )
+    .await?;
+    let mut active: message::ActiveModel = model.into();
+    active.content = Set(content);
+    active.edited_at = Set(Some(now.fixed_offset()));
+    let updated = active.update(&txn).await.map_err(map_db_err)?;
+    txn.commit().await.map_err(map_db_err)?;
+    Ok(updated)
 }

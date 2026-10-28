@@ -153,3 +153,35 @@ pub mod message {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// 消息编辑历史（P1）。
+pub mod message_revision {
+    use sea_orm::entity::prelude::*;
+
+    /// 单条消息的某个历史版本。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "message_revisions")]
+    pub struct Model {
+        /// 修订 ID。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: Uuid,
+        /// 所属消息。
+        pub message_id: Uuid,
+        /// 版本号（1 起，首次编辑时补录原内容为 1）。
+        pub version: i32,
+        /// 该版本的正文快照。
+        #[sea_orm(column_type = "JsonBinary")]
+        pub content: Json,
+        /// 编辑者（补录的原版本为发送者）。
+        #[sea_orm(nullable)]
+        pub editor_id: Option<Uuid>,
+        /// 该版本产生时间（原版本为发送时间）。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}

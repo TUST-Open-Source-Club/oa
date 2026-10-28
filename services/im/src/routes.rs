@@ -2,7 +2,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
@@ -771,6 +771,68 @@ pub async fn remove_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// 编辑消息请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditMessageRequest {
+    /// 新的正文（类型沿用原消息）。
+    pub content: Value,
+}
+
+/// 编辑历史版本 DTO。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionDto {
+    /// 版本号（1 为首次编辑前补录的原内容）。
+    pub version: i32,
+    /// 该版正文。
+    pub content: Value,
+    /// 编辑者。
+    pub editor_id: Option<String>,
+    /// 该版本产生时间。
+    pub created_at: DateTime<FixedOffset>,
+}
+
+impl From<&crate::entity::message_revision::Model> for RevisionDto {
+    fn from(model: &crate::entity::message_revision::Model) -> Self {
+        Self {
+            version: model.version,
+            content: model.content.clone(),
+            editor_id: model.editor_id.map(|id| id.to_string()),
+            created_at: model.created_at,
+        }
+    }
+}
+
+/// `PATCH /conversations/{id}/messages/{message_id}`：编辑自己的消息并广播。
+pub async fn edit_message(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((conversation_id, message_id)): Path<(Uuid, Uuid)>,
+    Json(input): Json<EditMessageRequest>,
+) -> Result<Json<MessageDto>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let (model, edited) =
+        crate::service::edit_message(&state, user_id, conversation_id, message_id, &input.content)
+            .await?;
+    if edited {
+        crate::realtime::broadcast_edited(&state, conversation_id, &model).await;
+    }
+    Ok(Json(MessageDto::from(&model)))
+}
+
+/// `GET /conversations/{id}/messages/{message_id}/revisions`：编辑历史（版本倒序）。
+pub async fn message_revisions(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((conversation_id, message_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Vec<RevisionDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let revisions =
+        crate::service::message_revisions(&state, user_id, conversation_id, message_id).await?;
+    Ok(Json(revisions.iter().map(RevisionDto::from).collect()))
+}
+
 /// `/api/v1/im` 路由。
 pub fn router() -> Router<SharedState> {
     Router::new()
@@ -781,6 +843,14 @@ pub fn router() -> Router<SharedState> {
         .route(
             "/conversations/{id}/messages",
             get(list_messages).post(send_message),
+        )
+        .route(
+            "/conversations/{id}/messages/{message_id}",
+            patch(edit_message),
+        )
+        .route(
+            "/conversations/{id}/messages/{message_id}/revisions",
+            get(message_revisions),
         )
         .route(
             "/conversations/{id}/messages/{message_id}/recall",

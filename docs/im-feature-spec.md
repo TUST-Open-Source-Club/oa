@@ -73,3 +73,22 @@
 | 改群设置 / 禁言 | ✅ | ✅ | ❌ |
 | 转让群主 / 解散 | ✅ | ❌ | ❌ |
 | 编辑/撤回自己的消息 | ✅ | ✅ | ✅ |
+
+### 7.1 消息编辑（已完成）
+
+接口：
+
+- `PATCH /conversations/{cid}/messages/{mid}`，请求体 `{ "content": {...} }`，返回更新后的消息；
+- `GET /conversations/{cid}/messages/{mid}/revisions`，返回版本快照（`version` 倒序）。
+
+规则：
+
+- 仅发送者本人可编辑；群主/管理员同样不能改他人消息（403 `IM_FORBIDDEN`）；
+- 已撤回消息不可编辑（400 `IM_MESSAGE_RECALLED`）；
+- 正文与原内容一致时幂等返回，不写版本、不更新 `editedAt`；
+- 首次编辑把原内容补录为 `version=1`（编辑者=发送者、时间=发送时间），新正文为 `version=2`，之后每次编辑版本号 +1；
+- 编辑不改变 `seq`，不重排会话；消息列表接口返回 `editedAt`，前端显示「已编辑」并可查看历史。
+
+数据：`message_revisions(id, message_id, version, content, editor_id, created_at)`，索引 `(message_id, version)`；写入在同一事务内完成并锁消息行，避免并发版本号冲突。
+
+覆盖用例：`services/im/tests/edit_flow.rs`（8 条：本人编辑、原内容补录、多次编辑追加、非发送者 403、已撤回 400、空内容 422、非成员 403、无变化不写版本）。
