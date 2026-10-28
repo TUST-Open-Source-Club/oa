@@ -46,9 +46,23 @@ pub struct EventEnvelope {
     /// 去重键（同一业务对象的多次通知折叠）。
     #[serde(default)]
     pub dedup_key: Option<String>,
+    /// `@` 提及：成员 ID 数组，含 `"@all"` 表示所有人（IM 消息事件使用）。
+    #[serde(default)]
+    pub mentions: Vec<String>,
 }
 
 impl EventEnvelope {
+    /// 该接收者是否被显式提及（含 `@all`）。
+    pub fn mentions_user(&self, user_id: &Uuid) -> bool {
+        let needle = user_id.to_string();
+        self.mentions.iter().any(|m| m == "@all" || m == &needle)
+    }
+
+    /// 是否为「@所有人」事件。
+    pub fn mentions_all(&self) -> bool {
+        self.mentions.iter().any(|m| m == "@all")
+    }
+
     /// 归一化优先级（默认 default）。
     pub fn normalized_priority(&self) -> &str {
         match self.priority.as_deref() {
@@ -164,6 +178,7 @@ mod tests {
             body: "b".into(),
             priority: priority.map(str::to_string),
             dedup_key: None,
+            mentions: Vec::new(),
         }
     }
 

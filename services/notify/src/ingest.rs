@@ -37,7 +37,15 @@ pub async fn apply_event(state: &AppState, event: &EventEnvelope) -> Result<(u32
                 user_id: *user_id,
                 event_id: event.id,
                 event_type: event.event_type.clone(),
-                title: event.title.clone(),
+                title: if event.mentions_user(user_id) {
+                    if event.mentions_all() {
+                        format!("{}（@所有人）", event.title)
+                    } else {
+                        format!("{} 有人@了你", event.title)
+                    }
+                } else {
+                    event.title.clone()
+                },
                 body: event.body.clone(),
                 priority: event.normalized_priority().to_string(),
                 resource_type: event.resource.as_ref().map(|r| r.resource_type.clone()),
