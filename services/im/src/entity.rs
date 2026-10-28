@@ -71,6 +71,8 @@ pub mod conversation_member {
         pub last_read_seq: i64,
         /// 消息免打扰。
         pub muted: bool,
+        /// 通知级别：all / mentions / mute。
+        pub notify_level: String,
         /// 禁言到期时间（None = 未禁言）。
         #[sea_orm(nullable)]
         pub muted_until: Option<DateTimeWithTimeZone>,

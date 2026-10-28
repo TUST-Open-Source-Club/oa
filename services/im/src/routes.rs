@@ -152,6 +152,8 @@ pub struct ConversationDto {
     pub typing_user_ids: Vec<String>,
     /// 是否免打扰。
     pub muted: bool,
+    /// 我的通知级别（all / mentions / mute）。
+    pub notify_level: String,
     /// 是否置顶。
     pub pinned: bool,
     /// 成员 ID。
@@ -188,6 +190,7 @@ pub async fn list_conversations(
             )
             .await?,
             muted: row.member.muted,
+            notify_level: row.member.notify_level.clone(),
             pinned: row.member.pinned,
             typing_user_ids: state
                 .typing
@@ -282,6 +285,7 @@ pub async fn create_conversation(
         unread: repo::unread_for(&conversation, &member),
         has_mention: false,
         muted: member.muted,
+        notify_level: member.notify_level.clone(),
         pinned: member.pinned,
         member_ids: members.iter().map(|m| m.user_id.to_string()).collect(),
         typing_user_ids: Vec::new(),
@@ -476,6 +480,35 @@ pub async fn mark_read(
     let user_id = user_id_of(&auth)?;
     let member = crate::service::apply_read(&state, user_id, conversation_id, input.seq).await?;
     Ok(Json(json!({ "lastReadSeq": member.last_read_seq })))
+}
+
+/// 通知级别请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotifyLevelRequest {
+    /// all / mentions / mute。
+    pub level: String,
+}
+
+/// `POST /conversations/{id}/notify`：设置自己的会话通知级别。
+pub async fn set_notify_level(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(conversation_id): Path<Uuid>,
+    Json(input): Json<NotifyLevelRequest>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    if !crate::domain::NOTIFY_LEVELS.contains(&input.level.as_str()) {
+        return Err(AppError::unprocessable(
+            "IM_VALIDATION",
+            "通知级别不合法",
+            vec![FieldError::new("level", "仅支持 all / mentions / mute")],
+        ));
+    }
+    repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
+    let member =
+        repo::set_member_notify_level(&state.db, conversation_id, user_id, &input.level).await?;
+    Ok(Json(json!({ "level": member.notify_level })))
 }
 
 /// 群管理操作请求。
@@ -1051,6 +1084,7 @@ pub fn router() -> Router<SharedState> {
             get(search_in_conversation),
         )
         .route("/search/messages", get(search_messages))
+        .route("/conversations/{id}/notify", post(set_notify_level))
         .route("/conversations/{id}/typing", post(typing_heartbeat))
         .route("/conversations/{id}/read", post(mark_read))
         .route(

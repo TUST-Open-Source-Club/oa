@@ -66,6 +66,28 @@ pub fn preview_of(kind: &str, content: &Value) -> String {
     }
 }
 
+/// 通知级别常量。
+pub const NOTIFY_ALL: &str = "all";
+/// 仅 @我。
+pub const NOTIFY_MENTIONS: &str = "mentions";
+/// 静音。
+pub const NOTIFY_MUTE: &str = "mute";
+
+/// 允许的通知级别。
+pub const NOTIFY_LEVELS: &[&str] = &[NOTIFY_ALL, NOTIFY_MENTIONS, NOTIFY_MUTE];
+
+/// 按成员的通知级别判断这条消息是否要提醒他。
+pub fn should_notify(level: &str, user_id: uuid::Uuid, mentions: &[String]) -> bool {
+    let needle = user_id.to_string();
+    match level {
+        NOTIFY_MUTE => false,
+        NOTIFY_MENTIONS => mentions
+            .iter()
+            .any(|mention| mention == "@all" || mention == &needle),
+        _ => true,
+    }
+}
+
 /// 计算未读数（max(0, next_seq - last_read_seq)）。
 pub fn unread_of(next_seq: i64, last_read_seq: i64) -> i64 {
     (next_seq - last_read_seq).max(0)
@@ -109,6 +131,25 @@ mod tests {
         assert_eq!(preview_of("unknown", &json!({})), "");
         let long = json!({"text": "x".repeat(200)});
         assert_eq!(preview_of("text", &long).chars().count(), 80);
+    }
+
+    #[test]
+    fn decides_notifications_by_level() {
+        let user = uuid::Uuid::now_v7();
+        let other = uuid::Uuid::now_v7();
+        let mentioned = vec![user.to_string()];
+        let to_other = vec![other.to_string()];
+        assert!(!should_notify(NOTIFY_MUTE, user, &mentioned), "静音不提醒");
+        assert!(
+            !should_notify(NOTIFY_MENTIONS, user, &to_other),
+            "仅 @ 时非 @ 不提醒"
+        );
+        assert!(should_notify(NOTIFY_MENTIONS, user, &mentioned));
+        assert!(
+            should_notify(NOTIFY_MENTIONS, user, &["@all".to_string()]),
+            "@所有人 视为提到每个人"
+        );
+        assert!(should_notify(NOTIFY_ALL, user, &[]));
     }
 
     #[test]

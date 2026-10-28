@@ -181,6 +181,7 @@ pub async fn insert_member(
         muted_until: Set(None),
         can_speak: Set(true),
         muted: Set(false),
+        notify_level: Set("all".to_string()),
         pinned: Set(false),
         joined_at: Set(now.fixed_offset()),
         left_at: Set(None),
@@ -831,4 +832,19 @@ pub async fn search_messages(
     rows.iter()
         .map(|row| message::Model::from_query_result(row, "").map_err(map_db_err))
         .collect()
+}
+
+/// 设置成员的通知级别（all / mentions / mute）。
+pub async fn set_member_notify_level(
+    db: &DatabaseConnection,
+    conversation_id: Uuid,
+    user_id: Uuid,
+    level: &str,
+) -> Result<conversation_member::Model, AppError> {
+    let member = find_member(db, conversation_id, user_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("IM_MEMBER_NOT_FOUND", "成员不存在"))?;
+    let mut active: conversation_member::ActiveModel = member.into();
+    active.notify_level = Set(level.to_string());
+    active.update(db).await.map_err(map_db_err)
 }

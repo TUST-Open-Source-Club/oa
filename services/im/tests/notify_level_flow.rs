@@ -30,12 +30,7 @@ async fn create_group(app: &TestApp, token: &str, members: &[Uuid]) -> String {
 }
 
 /// 设置通知级别。
-async fn set_level(
-    app: &TestApp,
-    token: &str,
-    conversation_id: &str,
-    level: &str,
-) -> TestResponse {
+async fn set_level(app: &TestApp, token: &str, conversation_id: &str, level: &str) -> TestResponse {
     request(
         &app.app,
         "POST",
@@ -47,7 +42,10 @@ async fn set_level(
 }
 
 /// 取会话列表里的某个会话。
-fn conversation_of<'a>(list: &'a serde_json::Value, conversation_id: &str) -> &'a serde_json::Value {
+fn conversation_of<'a>(
+    list: &'a serde_json::Value,
+    conversation_id: &str,
+) -> &'a serde_json::Value {
     list.as_array()
         .unwrap()
         .iter()
@@ -74,7 +72,10 @@ async fn notify_level_is_per_member_and_reflected_in_list() {
     )
     .await;
     let body = list.expect(StatusCode::OK);
-    assert_eq!(conversation_of(&body, &conversation_id)["notifyLevel"], "all");
+    assert_eq!(
+        conversation_of(&body, &conversation_id)["notifyLevel"],
+        "all"
+    );
 
     // 成员改成仅 @我
     let updated = set_level(&app, &member_token, &conversation_id, "mentions").await;
@@ -105,7 +106,10 @@ async fn notify_level_is_per_member_and_reflected_in_list() {
     )
     .await;
     let body = list.expect(StatusCode::OK);
-    assert_eq!(conversation_of(&body, &conversation_id)["notifyLevel"], "all");
+    assert_eq!(
+        conversation_of(&body, &conversation_id)["notifyLevel"],
+        "all"
+    );
 
     // 静音
     set_level(&app, &member_token, &conversation_id, "mute")

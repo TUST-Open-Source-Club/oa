@@ -72,7 +72,7 @@ pub async fn create_message(
             content: content.clone(),
             reply_to_id,
             client_msg_id,
-            mentions,
+            mentions: mentions.clone(),
             thread_root_id,
         },
         now,
@@ -81,9 +81,11 @@ pub async fn create_message(
 
     if created && state.bus.is_some() {
         let members = repo::list_members(&state.db, conversation_id).await?;
+        // 按每位成员的会话通知级别裁剪提醒对象（静音 / 仅 @我）
         let targets: Vec<String> = members
             .iter()
             .filter(|member| member.user_id != sender_id)
+            .filter(|member| domain::should_notify(&member.notify_level, member.user_id, &mentions))
             .map(|member| member.user_id.to_string())
             .collect();
         let title = match ctx.conversation.r#type.as_str() {
@@ -103,7 +105,7 @@ pub async fn create_message(
             "title": title,
             "body": domain::preview_of(&model.r#type, &model.content),
             // 供 notify 判断是否要发「@了你 / @所有人」提醒
-            "mentions": model.mentions,
+            "mentions": mentions,
             "priority": "high"
         });
         if let Err(err) =

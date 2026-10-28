@@ -47,6 +47,7 @@ interface ConversationItem {
   onlyAdminsSpeak?: boolean
   unread: number
   hasMention?: boolean
+  notifyLevel?: string
   typingUserIds?: string[]
   memberIds: string[]
   lastMessage: MessageItem | null
@@ -732,6 +733,19 @@ async function openHistory(message: MessageItem) {
   }
 }
 
+/** 设置会话通知级别（all / mentions / mute）。 */
+async function setNotifyLevel(conversation: ConversationItem, level: string) {
+  error.value = ''
+  try {
+    await api(`conversations/${conversation.id}/notify`, { method: 'POST', body: { level } })
+    conversation.notifyLevel = level
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  } finally {
+    closeMenus()
+  }
+}
+
 /** 会话标记已读。 */
 async function markConversationRead(conversation: ConversationItem) {
   const seq = conversation.lastMessage?.seq ?? 0
@@ -1175,6 +1189,21 @@ onUnmounted(() => {
       </button>
       <button class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]" @click="markConversationRead(convMenu.conversation!)">
         标记已读
+      </button>
+      <div class="my-1 border-t border-[var(--border)]" />
+      <p class="px-3 pb-0.5 pt-1 text-[10px] text-neutral-400">通知</p>
+      <button
+        v-for="option in [
+          { level: 'all', label: '全部消息' },
+          { level: 'mentions', label: '仅 @我' },
+          { level: 'mute', label: '静音' },
+        ]"
+        :key="option.level"
+        class="flex w-full items-center justify-between px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="setNotifyLevel(convMenu.conversation!, option.level)"
+      >
+        <span>{{ option.label }}</span>
+        <span v-if="(convMenu.conversation!.notifyLevel ?? 'all') === option.level" class="text-primary-600">✓</span>
       </button>
     </div>
 

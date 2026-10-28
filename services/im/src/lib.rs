@@ -230,6 +230,7 @@ pub mod migration4;
 pub mod migration5;
 pub mod migration6;
 pub mod migration7;
+pub mod migration8;
 /// WebSocket 实时通道。
 pub mod realtime;
 pub mod repo;

@@ -145,3 +145,13 @@
 - 前端：输入框节流 2 秒上报一次，会话头部与列表预览显示「X 正在输入…」；
 - 说明：当前页面用 4s 轮询而非 WS，所以走 HTTP 心跳而非 spec 里的 WS `typing` 事件；
 - 用例：`services/im/tests/typing_flow.rs`（2 条）+ `TypingRegistry` 过期单测。
+
+### 7.8 会话通知规则（已完成）
+
+- 迁移 v8：`conversation_members.notify_level`（`all` / `mentions` / `mute`，默认 `all`）；
+- `POST /conversations/{cid}/notify` body `{level}`：设置**自己**在该会话的级别；
+  会话列表返回 `notifyLevel`；非法级别 422，非成员 403；
+- 发送消息时按每位成员的级别裁剪 notify 提醒对象：`mute` 不提醒、`mentions` 仅在自己被 @
+  或消息含 `@所有人` 时提醒（`domain::should_notify`，含单测）；
+- 前端：会话右键菜单「通知」三项（全部 / 仅 @我 / 静音），当前项打勾；
+- 用例：`services/im/tests/notify_level_flow.rs`（2 条）。
