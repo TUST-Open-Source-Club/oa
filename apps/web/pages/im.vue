@@ -21,6 +21,7 @@ interface MessageItem {
   threadRootId?: string | null
   threadReplyCount?: number
   reactions?: ReactionItem[]
+  starred?: boolean
   status?: string
   editedAt?: string | null
   createdAt: string
@@ -56,6 +57,7 @@ interface ConversationItem {
   onlyAdminsSpeak?: boolean
   unread: number
   hasMention?: boolean
+  pinned?: boolean
   notifyLevel?: string
   typingUserIds?: string[]
   memberIds: string[]
@@ -212,6 +214,7 @@ const isOwner = computed(() => myRole.value === 'owner')
 /** 会话排序：有未读 @ 的置顶，其次按更新时间倒序。 */
 const sortedConversations = computed(() =>
   [...conversations.value].sort((a, b) => {
+    if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
     if (Boolean(a.hasMention) !== Boolean(b.hasMention)) return a.hasMention ? -1 : 1
     return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   }),
@@ -809,6 +812,35 @@ async function openHistory(message: MessageItem) {
   }
 }
 
+/** 置顶/取消置顶会话。 */
+async function setPinned(conversation: ConversationItem, pinned: boolean) {
+  error.value = ''
+  try {
+    await api(`conversations/${conversation.id}/pin`, { method: 'POST', body: { pinned } })
+    conversation.pinned = pinned
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  } finally {
+    closeMenus()
+  }
+}
+
+/** 收藏/取消收藏消息。 */
+async function toggleStar(message: MessageItem) {
+  error.value = ''
+  try {
+    const result = await api<{ starred: boolean }>(
+      `conversations/${activeId.value}/messages/${message.id}/star`,
+      { method: 'POST' },
+    )
+    message.starred = result.starred
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  } finally {
+    closeMenus()
+  }
+}
+
 /** 设置会话通知级别（all / mentions / mute）。 */
 async function setNotifyLevel(conversation: ConversationItem, level: string) {
   error.value = ''
@@ -966,6 +998,11 @@ onUnmounted(() => {
                   {{ titleOf(conversation) }}
                 </span>
                 <span
+                  v-if="conversation.pinned"
+                  class="shrink-0 text-[10px] text-neutral-400"
+                  title="已置顶"
+                >置顶</span>
+                <span
                   v-if="conversation.hasMention"
                   class="shrink-0 rounded bg-primary-500/15 px-1 text-[10px] font-medium text-primary-700 dark:text-primary-200"
                   title="有人@了你"
@@ -1061,6 +1098,7 @@ onUnmounted(() => {
               <p class="mb-0.5 flex items-center gap-1 text-[10px] opacity-60">
                 {{ message.senderId === auth.user?.id ? '我' : (users[message.senderId ?? '']?.nickname ?? '系统') }}
                 · {{ timeOf(message.createdAt) }}
+                <span v-if="message.starred" class="not-italic" title="已收藏">★</span>
                 <span
                   v-if="message.mentions?.includes('@all')"
                   class="rounded bg-white/20 px-1 text-[10px] not-italic"
@@ -1307,6 +1345,12 @@ onUnmounted(() => {
       <button class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]" @click="openConversation(convMenu.conversation!.id); closeMenus()">
         打开
       </button>
+      <button
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="setPinned(convMenu.conversation!, !convMenu.conversation!.pinned)"
+      >
+        {{ convMenu.conversation!.pinned ? '取消置顶' : '置顶' }}
+      </button>
       <button class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]" @click="markConversationRead(convMenu.conversation!)">
         标记已读
       </button>
@@ -1372,6 +1416,12 @@ onUnmounted(() => {
         @click="openEdit(msgMenu.message!)"
       >
         编辑
+      </button>
+      <button
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="toggleStar(msgMenu.message!)"
+      >
+        {{ msgMenu.message.starred ? '取消收藏' : '收藏' }}
       </button>
       <button
         v-if="msgMenu.message.editedAt"

@@ -251,3 +251,30 @@ pub mod im_file {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// 消息收藏。
+pub mod message_star {
+    use sea_orm::entity::prelude::*;
+
+    /// 收藏记录（用户 + 消息 联合主键）。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "message_stars")]
+    pub struct Model {
+        /// 收藏者。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub user_id: Uuid,
+        /// 消息。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub message_id: Uuid,
+        /// 冗余会话 ID，便于按会话清理与查询。
+        pub conversation_id: Uuid,
+        /// 收藏时间。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}

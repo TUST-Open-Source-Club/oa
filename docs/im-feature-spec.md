@@ -167,3 +167,14 @@
 - 前端：输入框回形针按钮选择文件（≤4MB 提前拦截），图片消息在气泡内直接渲染，
   其他附件显示为可下载文件名卡片；BFF 新增 `/api/im/files/[id]` 转发签名下载；
 - 用例：`services/im/tests/media_flow.rs`（3 条：上传/签名下载/越权签名/校验、图片消息回读）。
+
+### 7.10 会话置顶与消息收藏（P2，已完成）
+
+- `POST /conversations/{cid}/pin` body `{pinned}`：设置**自己**的会话置顶（复用 `conversation_members.pinned`）；
+- 迁移 v10：`message_stars(user_id, message_id, conversation_id, created_at)`，联合主键；
+- `POST /conversations/{cid}/messages/{mid}/star`：切换收藏，返回 `{starred}`；
+- 消息列表/线程返回 `starred`（仅当前用户自己的收藏）；
+- `GET /messages/starred`：我收藏的消息，按收藏时间倒序，且仍是我参与的会话；
+- 前端：会话右键「置顶/取消置顶」（列表排序：置顶 > 未读 @ > 更新时间，带「置顶」标记）；
+  消息右键「收藏/取消收藏」，气泡时间行显示 ★；
+- 用例：`services/im/tests/pin_star_flow.rs`（3 条）。

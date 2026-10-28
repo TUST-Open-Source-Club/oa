@@ -15,6 +15,7 @@ use club_common::{new_id, AppError};
 use crate::domain::unread_of;
 use crate::entity::{
     conversation, conversation_member, im_file, message, message_reaction, message_revision,
+    message_star,
 };
 
 /// 将数据库错误映射为统一错误。
@@ -881,4 +882,123 @@ pub async fn find_file(
         .one(db)
         .await
         .map_err(map_db_err)
+}
+
+/// 设置成员对会话的置顶。
+pub async fn set_member_pinned(
+    db: &DatabaseConnection,
+    conversation_id: Uuid,
+    user_id: Uuid,
+    pinned: bool,
+) -> Result<conversation_member::Model, AppError> {
+    let member = find_member(db, conversation_id, user_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("IM_MEMBER_NOT_FOUND", "成员不存在"))?;
+    let mut active: conversation_member::ActiveModel = member.into();
+    active.pinned = Set(pinned);
+    active.update(db).await.map_err(map_db_err)
+}
+
+/// 切换消息收藏，返回切换后是否已收藏。
+pub async fn toggle_star(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    conversation_id: Uuid,
+    message_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<bool, AppError> {
+    let existing = message_star::Entity::find_by_id((user_id, message_id))
+        .one(db)
+        .await
+        .map_err(map_db_err)?;
+    if existing.is_some() {
+        message_star::Entity::delete_by_id((user_id, message_id))
+            .exec(db)
+            .await
+            .map_err(map_db_err)?;
+        return Ok(false);
+    }
+    message_star::ActiveModel {
+        user_id: Set(user_id),
+        message_id: Set(message_id),
+        conversation_id: Set(conversation_id),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)?;
+    Ok(true)
+}
+
+/// 批量查询当前用户收藏了哪些消息。
+pub async fn starred_message_ids(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    message_ids: &[Uuid],
+) -> Result<std::collections::HashSet<Uuid>, AppError> {
+    let mut result = std::collections::HashSet::new();
+    if message_ids.is_empty() {
+        return Ok(result);
+    }
+    let placeholders = (2..message_ids.len() + 2)
+        .map(|index| format!("${index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT message_id FROM message_stars WHERE user_id = $1 AND message_id IN ({placeholders})"
+    );
+    let mut values: Vec<sea_orm::sea_query::Value> =
+        vec![sea_orm::sea_query::Value::Uuid(Some(user_id))];
+    values.extend(
+        message_ids
+            .iter()
+            .map(|id| sea_orm::sea_query::Value::Uuid(Some(*id))),
+    );
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            sql,
+            values,
+        ))
+        .await
+        .map_err(map_db_err)?;
+    for row in rows {
+        if let Ok(id) = row.try_get_by_index::<Uuid>(0) {
+            result.insert(id);
+        }
+    }
+    Ok(result)
+}
+
+/// 我收藏的消息（按收藏时间倒序，且仍是我参与的会话）。
+pub async fn list_starred(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    limit: u64,
+) -> Result<Vec<message::Model>, AppError> {
+    let sql = "SELECT m.id, m.conversation_id, m.seq, m.sender_id, m.type, m.content, \
+                      m.reply_to_id, m.client_msg_id, m.mentions, m.thread_root_id, \
+                      m.edited_at, m.status, m.recalled_at, m.created_at \
+               FROM messages m \
+               JOIN message_stars s ON s.message_id = m.id \
+               JOIN conversation_members cm \
+                 ON cm.conversation_id = m.conversation_id \
+                AND cm.user_id = $1 AND cm.left_at IS NULL \
+               WHERE s.user_id = $1 \
+               ORDER BY s.created_at DESC \
+               LIMIT $2";
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            sql,
+            vec![
+                sea_orm::sea_query::Value::Uuid(Some(user_id)),
+                sea_orm::sea_query::Value::BigInt(Some(limit as i64)),
+            ],
+        ))
+        .await
+        .map_err(map_db_err)?;
+    rows.iter()
+        .map(|row| message::Model::from_query_result(row, "").map_err(map_db_err))
+        .collect()
 }

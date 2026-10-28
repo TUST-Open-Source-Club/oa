@@ -70,6 +70,8 @@ pub struct MessageDto {
     pub thread_reply_count: i64,
     /// 表情回应聚合。
     pub reactions: Vec<ReactionDto>,
+    /// 当前用户是否收藏。
+    pub starred: bool,
     /// 编辑时间。
     pub edited_at: Option<DateTime<FixedOffset>>,
     /// 时间。
@@ -100,6 +102,7 @@ impl From<&message::Model> for MessageDto {
             thread_root_id: model.thread_root_id.map(|id| id.to_string()),
             thread_reply_count: 0,
             reactions: Vec::new(),
+            starred: false,
             edited_at: model.edited_at.map(|t| t.fixed_offset()),
             created_at: model.created_at,
         }
@@ -325,6 +328,7 @@ pub async fn list_messages(
     let root_ids: Vec<Uuid> = items.iter().map(|item| item.id).collect();
     let counts = repo::thread_reply_counts(&state.db, conversation_id, &root_ids).await?;
     let reactions = repo::reactions_for_messages(&state.db, &root_ids).await?;
+    let starred = repo::starred_message_ids(&state.db, user_id, &root_ids).await?;
     Ok(Json(
         items
             .iter()
@@ -335,6 +339,7 @@ pub async fn list_messages(
                     reactions.get(&item.id).map(Vec::as_slice).unwrap_or(&[]),
                     user_id,
                 );
+                dto.starred = starred.contains(&item.id);
                 dto
             })
             .collect(),
@@ -1021,6 +1026,64 @@ pub async fn download_file(
         .into_response())
 }
 
+/// 置顶请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinRequest {
+    /// 是否置顶。
+    pub pinned: bool,
+}
+
+/// `POST /conversations/{id}/pin`：设置自己的会话置顶。
+pub async fn set_pin(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(conversation_id): Path<Uuid>,
+    Json(input): Json<PinRequest>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
+    let member = repo::set_member_pinned(&state.db, conversation_id, user_id, input.pinned).await?;
+    Ok(Json(json!({ "pinned": member.pinned })))
+}
+
+/// `POST /conversations/{id}/messages/{mid}/star`：切换收藏。
+pub async fn toggle_star(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((conversation_id, message_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
+    repo::find_message(&state.db, conversation_id, message_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("IM_MESSAGE_NOT_FOUND", "消息不存在"))?;
+    let starred =
+        repo::toggle_star(&state.db, user_id, conversation_id, message_id, state.now()).await?;
+    Ok(Json(json!({ "starred": starred })))
+}
+
+/// `GET /messages/starred`：我收藏的消息。
+pub async fn list_starred(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Query(query): Query<MessageQuery>,
+) -> Result<Json<Vec<MessageDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
+    let items = repo::list_starred(&state.db, user_id, limit).await?;
+    Ok(Json(
+        items
+            .iter()
+            .map(|item| {
+                let mut dto = MessageDto::from(item);
+                dto.starred = true;
+                dto
+            })
+            .collect(),
+    ))
+}
+
 /// 编辑消息请求。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1097,6 +1160,7 @@ pub async fn list_thread(
     let replies = repo::list_thread_messages(&state.db, conversation_id, message_id).await?;
     let ids: Vec<Uuid> = replies.iter().map(|item| item.id).collect();
     let reactions = repo::reactions_for_messages(&state.db, &ids).await?;
+    let starred = repo::starred_message_ids(&state.db, user_id, &ids).await?;
     Ok(Json(
         replies
             .iter()
@@ -1106,6 +1170,7 @@ pub async fn list_thread(
                     reactions.get(&item.id).map(Vec::as_slice).unwrap_or(&[]),
                     user_id,
                 );
+                dto.starred = starred.contains(&item.id);
                 dto
             })
             .collect(),
@@ -1225,6 +1290,12 @@ pub fn router() -> Router<SharedState> {
             get(search_in_conversation),
         )
         .route("/search/messages", get(search_messages))
+        .route("/conversations/{id}/pin", post(set_pin))
+        .route(
+            "/conversations/{id}/messages/{message_id}/star",
+            post(toggle_star),
+        )
+        .route("/messages/starred", get(list_starred))
         .route("/uploads", post(upload_file))
         .route("/files/{id}", get(download_file))
         .route("/conversations/{id}/notify", post(set_notify_level))

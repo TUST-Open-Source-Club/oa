@@ -59,7 +59,12 @@ async fn set_pin(app: &TestApp, token: &str, conversation_id: &str, pinned: bool
 }
 
 /// 切换收藏。
-async fn toggle_star(app: &TestApp, token: &str, conversation_id: &str, message_id: &str) -> TestResponse {
+async fn toggle_star(
+    app: &TestApp,
+    token: &str,
+    conversation_id: &str,
+    message_id: &str,
+) -> TestResponse {
     request(
         &app.app,
         "POST",
@@ -100,7 +105,10 @@ async fn pin_is_per_member() {
         None,
     )
     .await;
-    assert_eq!(conversation_of(&list.expect(StatusCode::OK), &conversation_id)["pinned"], true);
+    assert_eq!(
+        conversation_of(&list.expect(StatusCode::OK), &conversation_id)["pinned"],
+        true
+    );
 
     // 另一位成员不受影响
     let list = request(
@@ -111,7 +119,10 @@ async fn pin_is_per_member() {
         None,
     )
     .await;
-    assert_eq!(conversation_of(&list.expect(StatusCode::OK), &conversation_id)["pinned"], false);
+    assert_eq!(
+        conversation_of(&list.expect(StatusCode::OK), &conversation_id)["pinned"],
+        false
+    );
 
     // 取消置顶
     set_pin(&app, &member_token, &conversation_id, false)
@@ -125,7 +136,10 @@ async fn pin_is_per_member() {
         None,
     )
     .await;
-    assert_eq!(conversation_of(&list.expect(StatusCode::OK), &conversation_id)["pinned"], false);
+    assert_eq!(
+        conversation_of(&list.expect(StatusCode::OK), &conversation_id)["pinned"],
+        false
+    );
 }
 
 #[tokio::test]
