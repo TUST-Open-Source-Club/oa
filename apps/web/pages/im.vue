@@ -17,6 +17,7 @@ interface MessageItem {
   type: string
   content: { text?: string }
   mentions?: string[]
+  replyToId?: string | null
   status?: string
   editedAt?: string | null
   createdAt: string
@@ -58,6 +59,7 @@ const text = ref('')
 const error = ref('')
 const sending = ref(false)
 const listEl = ref<HTMLElement | null>(null)
+const composerEl = ref<HTMLTextAreaElement | null>(null)
 const createOpen = ref(false)
 const pickedIds = ref<string[]>([])
 const groupName = ref('')
@@ -66,6 +68,8 @@ const mentionQuery = ref('')
 const mentionIndex = ref(0)
 /** 已选提及：ID → 昵称；'@all' 表示所有人。 */
 const pendingMentions = ref<Record<string, string>>({})
+/** 正在引用的消息。 */
+const replyTo = ref<MessageItem | null>(null)
 
 const msgMenu = reactive<{ open: boolean; x: number; y: number; message: MessageItem | null }>({
   open: false,
@@ -268,10 +272,16 @@ async function send() {
   try {
     await api(`conversations/${activeId.value}/messages`, {
       method: 'POST',
-      body: { type: 'text', content: { text: content }, mentions: Object.keys(pendingMentions.value) },
+      body: {
+        type: 'text',
+        content: { text: content },
+        mentions: Object.keys(pendingMentions.value),
+        replyToId: replyTo.value?.id,
+      },
     })
     text.value = ''
     pendingMentions.value = {}
+    replyTo.value = null
     mentionOpen.value = false
     await loadMessages()
     await loadConversations()
@@ -433,6 +443,38 @@ async function recallMessage(message: MessageItem) {
   } finally {
     closeMenus()
   }
+}
+
+/** 按 ID 查找已加载的消息。 */
+function messageById(id?: string | null) {
+  if (!id) return null
+  return messages.value.find((item) => item.id === id) ?? null
+}
+
+/** 引用块/预览用的单行摘要。 */
+function quoteText(message: MessageItem | null) {
+  if (!message) return '原消息不可用'
+  if (message.status === 'recalled') return '该消息已撤回'
+  if (message.type === 'text') return message.content?.text ?? ''
+  return `[${message.type}]`
+}
+
+/** 开始引用某条消息。 */
+function startReply(message: MessageItem) {
+  closeMenus()
+  if (message.status === 'recalled') return
+  replyTo.value = message
+  composerEl.value?.focus()
+}
+
+/** 跳转到被引用的消息并短暂高亮。 */
+function jumpToMessage(id?: string | null) {
+  if (!id) return
+  const el = document.getElementById(`msg-${id}`)
+  if (!el) return
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  el.classList.add('ring-2', 'ring-primary-500/50')
+  setTimeout(() => el.classList.remove('ring-2', 'ring-primary-500/50'), 1200)
 }
 
 /** 打开编辑弹窗（仅自己的文本消息）。 */
@@ -632,7 +674,8 @@ onUnmounted(() => {
               size="sm"
             />
             <div
-              class="max-w-[70%] rounded-[10px] px-3 py-1.5 text-[13px]"
+              :id="`msg-${message.id}`"
+              class="max-w-[70%] rounded-[10px] px-3 py-1.5 text-[13px] transition-shadow"
               :class="
                 message.senderId === auth.user?.id
                   ? 'rounded-br-[4px] bg-primary-600 text-white'
@@ -640,6 +683,22 @@ onUnmounted(() => {
               "
               @contextmenu.prevent="openMsgMenu($event, message)"
             >
+              <button
+                v-if="message.replyToId"
+                type="button"
+                class="mb-1 flex w-full flex-col items-start gap-0.5 rounded-[4px] border-l-2 px-1.5 py-0.5 text-left text-[11px]"
+                :class="
+                  message.senderId === auth.user?.id
+                    ? 'border-white/50 bg-white/10'
+                    : 'border-primary-400/60 bg-black/[0.03] dark:bg-white/[0.06]'
+                "
+                @click.stop="jumpToMessage(message.replyToId)"
+              >
+                <span class="opacity-70">
+                  {{ users[messageById(message.replyToId)?.senderId ?? '']?.nickname ?? '未知成员' }}
+                </span>
+                <span class="line-clamp-2 opacity-80">{{ quoteText(messageById(message.replyToId)) }}</span>
+              </button>
               <p class="mb-0.5 flex items-center gap-1 text-[10px] opacity-60">
                 {{ message.senderId === auth.user?.id ? '我' : (users[message.senderId ?? '']?.nickname ?? '系统') }}
                 · {{ timeOf(message.createdAt) }}
@@ -672,6 +731,26 @@ onUnmounted(() => {
 
         <footer class="border-t border-[var(--border)] px-3 py-2.5">
           <p v-if="error" class="mb-2 text-[11px] text-danger-500">{{ error }}</p>
+          <div
+            v-if="replyTo"
+            class="mb-2 flex items-center gap-2 rounded-[var(--radius-field)] border-l-2 border-primary-500 bg-[var(--surface-muted)] px-2 py-1.5 text-[11px]"
+          >
+            <span class="min-w-0 flex-1">
+              <span class="block text-neutral-500">
+                回复 {{ users[replyTo.senderId ?? '']?.nickname ?? '成员' }}
+              </span>
+              <span class="block truncate text-[var(--text-strong)]">{{ quoteText(replyTo) }}</span>
+            </span>
+            <button
+              type="button"
+              class="shrink-0 rounded p-0.5 text-neutral-400 hover:bg-[var(--surface-hover)] hover:text-neutral-600"
+              title="取消引用"
+              aria-label="取消引用"
+              @click="replyTo = null"
+            >
+              <AppIcon name="close" class="size-3.5" />
+            </button>
+          </div>
           <div class="relative flex items-end gap-2">
             <div
               v-if="mentionOpen && mentionCandidates.length"
@@ -690,6 +769,7 @@ onUnmounted(() => {
               </button>
             </div>
             <textarea
+              ref="composerEl"
               v-model="text"
               rows="1"
               placeholder="输入消息，Enter 发送"
@@ -731,6 +811,13 @@ onUnmounted(() => {
       :style="{ left: `${msgMenu.x}px`, top: `${msgMenu.y}px` }"
       @click.stop
     >
+      <button
+        v-if="msgMenu.message.status !== 'recalled'"
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="startReply(msgMenu.message!)"
+      >
+        回复
+      </button>
       <button class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]" @click="copyMessage(msgMenu.message!)">
         复制文本
       </button>

@@ -92,3 +92,11 @@
 数据：`message_revisions(id, message_id, version, content, editor_id, created_at)`，索引 `(message_id, version)`；写入在同一事务内完成并锁消息行，避免并发版本号冲突。
 
 覆盖用例：`services/im/tests/edit_flow.rs`（8 条：本人编辑、原内容补录、多次编辑追加、非发送者 403、已撤回 400、空内容 422、非成员 403、无变化不写版本）。
+
+### 7.2 引用回复（已完成）
+
+- 前端右键消息「回复」→ 输入框上方显示被引用消息（可取消），发送时带 `replyToId`；
+- 气泡内渲染引用块（发送者 + 摘要），点击滚动到原消息并短暂高亮；
+- 原消息已撤回时显示「该消息已撤回」，未加载到窗口内显示「原消息不可用」；
+- 服务端已有校验（引用不存在的消息、跨会话引用 → 422 `IM_VALIDATION`），
+  本步补回归用例：`services/im/tests/reply_flow.rs`（落库回读、跨会话拒绝）。
