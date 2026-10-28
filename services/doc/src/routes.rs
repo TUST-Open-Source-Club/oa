@@ -562,10 +562,7 @@ pub fn router() -> Router<SharedState> {
             "/spaces/{id}/nodes/{node_id}",
             get(get_node).patch(patch_node).delete(delete_node),
         )
-        .route(
-            "/spaces/{id}/nodes/{node_id}/restore",
-            post(restore_node),
-        )
+        .route("/spaces/{id}/nodes/{node_id}/restore", post(restore_node))
         .route(
             "/spaces/{id}/nodes/{node_id}/content",
             axum::routing::put(update_content),

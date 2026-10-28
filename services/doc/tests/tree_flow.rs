@@ -152,14 +152,7 @@ async fn rename_move_and_reorder() {
     // 排序：再建一页，把 page 置顶
     let second = create_node(&app, &token, &space_id, "page", "第二页", Some(&folder_b)).await;
     let second_id = second["id"].as_str().unwrap().to_string();
-    let reordered = patch_node(
-        &app,
-        &token,
-        &space_id,
-        &page_id,
-        json!({ "position": 0 }),
-    )
-    .await;
+    let reordered = patch_node(&app, &token, &space_id, &page_id, json!({ "position": 0 })).await;
     assert_eq!(reordered.expect(StatusCode::OK)["position"], 0);
     let snapshot = tree(&app, &token, &space_id).await;
     let (folder, _) = find_in_tree(&snapshot, &folder_b).expect("目录 B");
@@ -209,14 +202,7 @@ async fn move_rejects_cycles_and_invalid_parents() {
     assert_eq!(body["code"], "DOC_TREE_CYCLE");
 
     // 父节点必须是文件夹
-    let bad_parent = patch_node(
-        &app,
-        &token,
-        &space_id,
-        &inner,
-        json!({ "parentId": page }),
-    )
-    .await;
+    let bad_parent = patch_node(&app, &token, &space_id, &inner, json!({ "parentId": page })).await;
     let body = bad_parent.expect(StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["code"], "DOC_VALIDATION");
 
@@ -248,7 +234,8 @@ async fn delete_hides_subtree_and_restore_brings_it_back() {
         .as_str()
         .unwrap()
         .to_string();
-    let page = create_node(&app, &token, &space_id, "page", "里面的页面", Some(&folder)).await["id"]
+    let page = create_node(&app, &token, &space_id, "page", "里面的页面", Some(&folder)).await
+        ["id"]
         .as_str()
         .unwrap()
         .to_string();

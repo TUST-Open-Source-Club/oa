@@ -398,7 +398,10 @@ pub async fn restore_subtree(
         }
     }
     let result = node::Entity::update_many()
-        .col_expr(node::Column::DeletedAt, Expr::value(Option::<DateTime<Utc>>::None))
+        .col_expr(
+            node::Column::DeletedAt,
+            Expr::value(Option::<DateTime<Utc>>::None),
+        )
         .filter(node::Column::Id.is_in(ids))
         .filter(node::Column::DeletedAt.is_not_null())
         .exec(db)
