@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 用户管理（管理员）：创建人类账号/Bot、Bot 权限矩阵、禁用与重置密码。 */
-import { Button, Card, Input } from '@club-oa/ui'
+import { Button, Input } from '@club-oa/ui'
 
 /** 用户行。 */
 interface UserRow {
@@ -20,6 +20,7 @@ const modules = ['im', 'task', 'doc', 'event', 'drive', 'notify']
 const moduleLabels: Record<string, string> = {
   im: '消息', task: '任务', doc: '文档', event: '活动', drive: '网盘', notify: '通知',
 }
+const PAGE_SIZE = 20
 
 const users = ref<UserRow[]>([])
 const total = ref(0)
@@ -50,13 +51,27 @@ function api<T>(path: string, options: Record<string, unknown> = {}) {
   })
 }
 
+/** 状态中文名。 */
+function statusLabel(status: string): string {
+  if (status === 'active') return '正常'
+  if (status === 'disabled') return '已禁用'
+  return '待激活'
+}
+
+/** 状态徽标配色。 */
+function statusClass(status: string): string {
+  if (status === 'active') return 'bg-success-50 text-success-700'
+  if (status === 'disabled') return 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800'
+  return 'bg-warning-50 text-warning-700'
+}
+
 /** 加载用户列表。 */
 async function loadUsers() {
   loading.value = true
   message.value = ''
   try {
     const response = await api<{ items: UserRow[]; total: number }>('users', {
-      query: { page: page.value, pageSize: 20, q: keyword.value || undefined },
+      query: { page: page.value, pageSize: PAGE_SIZE, q: keyword.value || undefined },
     })
     users.value = response.items
     total.value = response.total
@@ -124,74 +139,134 @@ async function resetPassword(user: UserRow) {
   message.value = `已重置${result.devResetUrl ? `，链接：${result.devResetUrl}` : ''}`
 }
 
+/** 搜索：回到第一页。 */
+function onSearch() {
+  page.value = 1
+  void loadUsers()
+}
+
 onMounted(loadUsers)
 </script>
 
 <template>
-  <div class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h1 class="text-xl font-semibold">用户管理</h1>
-        <p class="mt-0.5 text-sm text-neutral-400">共 {{ total }} 个账号；Bot 可精确配置各模块读写权限</p>
+  <div class="mx-auto w-full max-w-[960px]">
+    <header class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-baseline gap-2">
+        <p class="text-[12px] text-neutral-500">
+          共 {{ total }} 个账号 · Bot 可精确配置模块读写
+        </p>
       </div>
       <div class="flex items-center gap-2">
-        <Input v-model="keyword" placeholder="搜索用户名/邮箱/昵称" class="max-w-56" @keyup.enter="page = 1; loadUsers()" />
-        <Button variant="secondary" size="sm" @click="page = 1; loadUsers()">搜索</Button>
+        <Input v-model="keyword" placeholder="搜索用户名/邮箱/昵称" class="w-56" autocomplete="off" @keyup.enter="onSearch" />
+        <Button variant="secondary" size="sm" @click="onSearch">搜索</Button>
         <Button size="sm" @click="createOpen = true">
-          <AppIcon name="plus" class="size-4" /> 新建账号
+          <AppIcon name="plus" class="size-3.5" />
+          新建账号
         </Button>
       </div>
-    </div>
+    </header>
 
-    <p v-if="message" class="text-sm text-neutral-500">{{ message }}</p>
+    <p
+      v-if="message"
+      class="mt-3 rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-[12px] break-all text-neutral-600 dark:text-neutral-300"
+    >
+      {{ message }}
+    </p>
 
-    <Card class="divide-y divide-neutral-100 dark:divide-neutral-800">
-      <div v-for="user in users" :key="user.id" class="flex flex-wrap items-center gap-3 py-2.5 text-sm">
+    <div
+      class="mt-4 overflow-hidden rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-card)]"
+    >
+      <article
+        v-for="(user, index) in users"
+        :key="user.id"
+        class="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors hover:bg-[var(--surface-hover)]"
+        :class="index > 0 ? 'border-t border-[var(--border)]' : ''"
+      >
         <UserAvatar :name="user.nickname" :seed="user.id" size="sm" />
         <div class="min-w-0 flex-1">
-          <p class="truncate font-medium">
+          <p class="flex items-center gap-1.5 truncate text-[13px] font-medium text-[var(--text-strong)]">
             {{ user.nickname }}
-            <span v-if="user.accountType === 'bot'" class="ml-1 rounded bg-primary-50 px-1 text-[10px] text-primary-700 dark:bg-primary-900/40">Bot</span>
+            <span
+              v-if="user.accountType === 'bot'"
+              class="rounded border border-primary-200 bg-primary-50 px-1 text-[10px] font-medium text-primary-700 dark:border-primary-800 dark:bg-primary-900/30 dark:text-primary-200"
+            >
+              Bot
+            </span>
           </p>
-          <p class="truncate text-xs text-neutral-400">
-            @{{ user.username }} · {{ user.email }} · {{ user.status === 'active' ? '正常' : user.status === 'disabled' ? '已禁用' : '待激活' }}
+          <p class="mt-0.5 truncate text-[12px] text-neutral-400">
+            @{{ user.username }} · {{ user.email }}
           </p>
         </div>
-        <div class="flex shrink-0 gap-1">
-          <Button v-if="user.accountType === 'bot'" variant="ghost" size="sm" @click="openPermissions(user)">权限</Button>
+        <span
+          class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium"
+          :class="statusClass(user.status)"
+        >
+          {{ statusLabel(user.status) }}
+        </span>
+        <div class="flex shrink-0 items-center gap-0.5">
+          <Button v-if="user.accountType === 'bot'" variant="ghost" size="sm" @click="openPermissions(user)">
+            权限
+          </Button>
           <Button variant="ghost" size="sm" @click="toggleStatus(user)">
             {{ user.status === 'active' ? '禁用' : '启用' }}
           </Button>
           <Button variant="ghost" size="sm" @click="resetPassword(user)">重置密码</Button>
         </div>
+      </article>
+      <p v-if="!users.length && !loading" class="px-4 py-12 text-center text-[12px] text-neutral-400">
+        暂无用户
+      </p>
+    </div>
+
+    <div v-if="total > PAGE_SIZE" class="mt-3 flex items-center justify-between text-[12px] text-neutral-500">
+      <span>第 {{ page }} 页 · 共 {{ Math.ceil(total / PAGE_SIZE) }} 页</span>
+      <div class="flex gap-1.5">
+        <Button variant="secondary" size="sm" :disabled="page <= 1" @click="page -= 1; loadUsers()">
+          上一页
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          :disabled="page * PAGE_SIZE >= total"
+          @click="page += 1; loadUsers()"
+        >
+          下一页
+        </Button>
       </div>
-      <p v-if="!users.length && !loading" class="py-8 text-center text-sm text-neutral-400">暂无用户</p>
-    </Card>
+    </div>
 
     <!-- 新建账号 -->
     <AppModal :open="createOpen" title="新建账号" @close="createOpen = false">
       <div class="space-y-3">
-        <div class="flex gap-2">
+        <div class="grid grid-cols-2 gap-1 rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface-muted)] p-1">
           <button
             v-for="option in [{ value: 'human', label: '成员账号' }, { value: 'bot', label: 'Bot 账号' }]"
             :key="option.value"
-            class="flex-1 rounded-[var(--radius-field)] border px-3 py-2 text-sm transition"
-            :class="createForm.accountType === option.value ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/40' : 'border-neutral-200 text-neutral-500 dark:border-neutral-700'"
+            class="rounded-[calc(var(--radius-field)-2px)] px-3 py-1.5 text-[12px] font-medium transition"
+            :class="
+              createForm.accountType === option.value
+                ? 'bg-[var(--surface)] text-[var(--text-strong)] shadow-[var(--shadow-card)]'
+                : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200'
+            "
             @click="createForm.accountType = option.value"
           >
             {{ option.label }}
           </button>
         </div>
-        <Input v-model="createForm.email" placeholder="邮箱" />
-        <Input v-model="createForm.username" placeholder="登录名" />
-        <Input v-model="createForm.nickname" placeholder="昵称" />
+        <Input v-model="createForm.email" label="邮箱" placeholder="alice@club.example.com" />
+        <Input v-model="createForm.username" label="登录名" placeholder="alice" />
+        <Input v-model="createForm.nickname" label="昵称" placeholder="张三" />
         <template v-if="createForm.accountType === 'bot'">
-          <Input v-model="createForm.password" type="password" placeholder="Bot 密码（≥8 位）" />
-          <div class="space-y-1.5 rounded-[var(--radius-field)] border border-neutral-200 p-3 text-sm dark:border-neutral-700">
-            <p class="text-xs text-neutral-500">模块权限</p>
-            <div v-for="module in modules" :key="module" class="flex items-center justify-between">
-              <span>{{ moduleLabels[module] }}</span>
-              <span class="flex gap-3 text-xs">
+          <Input v-model="createForm.password" label="Bot 密码" type="password" placeholder="至少 8 位" />
+          <div class="space-y-2 rounded-[var(--radius-field)] border border-[var(--border)] p-3">
+            <p class="text-[11px] font-medium tracking-[0.08em] text-neutral-400 uppercase">模块权限</p>
+            <div
+              v-for="module in modules"
+              :key="module"
+              class="flex items-center justify-between text-[12px]"
+            >
+              <span class="text-neutral-600 dark:text-neutral-300">{{ moduleLabels[module] }}</span>
+              <span class="flex gap-3 text-[11px] text-neutral-500">
                 <label class="flex items-center gap-1">
                   <input
                     type="checkbox"
@@ -210,7 +285,7 @@ onMounted(loadUsers)
             </div>
           </div>
         </template>
-        <Input v-else v-model="createForm.roles" placeholder="角色（逗号分隔，默认 member）" />
+        <Input v-else v-model="createForm.roles" label="角色" placeholder="逗号分隔，默认 member" />
       </div>
       <template #footer>
         <Button variant="secondary" @click="createOpen = false">取消</Button>
@@ -220,11 +295,15 @@ onMounted(loadUsers)
 
     <!-- Bot 权限矩阵 -->
     <AppModal :open="permOpen" title="Bot 权限矩阵" @close="permOpen = false">
-      <p class="mb-3 text-sm text-neutral-500">{{ permTarget?.nickname }}</p>
-      <div class="space-y-2 text-sm">
-        <div v-for="module in modules" :key="module" class="flex items-center justify-between rounded-[var(--radius-field)] border border-neutral-200 px-3 py-2 dark:border-neutral-700">
-          <span>{{ moduleLabels[module] }}</span>
-          <span class="flex gap-3 text-xs">
+      <p class="mb-3 text-[12px] text-neutral-500">{{ permTarget?.nickname }}</p>
+      <div class="space-y-1.5">
+        <div
+          v-for="module in modules"
+          :key="module"
+          class="flex items-center justify-between rounded-[var(--radius-field)] border border-[var(--border)] px-3 py-1.5 text-[12px]"
+        >
+          <span class="text-neutral-600 dark:text-neutral-300">{{ moduleLabels[module] }}</span>
+          <span class="flex gap-3 text-[11px] text-neutral-500">
             <label class="flex items-center gap-1">
               <input
                 type="checkbox"
