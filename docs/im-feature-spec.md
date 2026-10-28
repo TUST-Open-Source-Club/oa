@@ -123,3 +123,16 @@
 - 后端已有 `GET /conversations/{cid}/messages/{mid}/receipts`（成员 → 是否读到该消息）；
 - 前端在群聊输入框上方显示「已读 N/M」：取自己最近一条已加载消息的回执，
   随 4s 轮询刷新；单聊与无自己消息时不显示。
+
+### 7.6 消息搜索（已完成）
+
+- `GET /conversations/{cid}/messages/search?q=&limit=`：会话内搜索；
+- `GET /search/messages?q=&limit=`：跨会话搜索，仅覆盖调用者是成员的会话；
+- 匹配 `content->>'text'` 的大小写不敏感子串，`%`/`_` 按字面转义（Postgres 默认反斜杠转义），
+  已撤回消息不参与；结果按 `seq` 倒序，带 `conversationId` 便于跳转；
+- 关键词去空白后不能为空、≤ 100 字（422 `IM_VALIDATION`）；`limit` 默认 20、上限 50；
+- 迁移 v7 尝试启用 `pg_trgm` + GIN 索引（`(content->>'text') gin_trgm_ops`，
+  operator class 按 `pg_extension.extnamespace` 限定以兼容多 schema；无扩展/无权限时降级为顺序扫描）；
+- 前端：会话列表顶部搜索入口 + 防抖 300ms，结果展示会话名/正文/发送者，
+  点击跳到对应会话并滚动高亮（结果不在已加载窗口时按 `beforeSeq` 补拉）；
+- 用例：`services/im/tests/search_flow.rs`（4 条）。

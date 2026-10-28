@@ -79,6 +79,12 @@ const mentionIndex = ref(0)
 const pendingMentions = ref<Record<string, string>>({})
 /** 正在引用的消息。 */
 const replyTo = ref<MessageItem | null>(null)
+/** 搜索面板状态。 */
+const searchOpen = ref(false)
+const searchQuery = ref('')
+const searchResults = ref<Array<MessageItem & { conversationId: string }>>([])
+const searching = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 /** 最近一条自己消息的已读情况。 */
 const receipts = ref<{ read: number; total: number } | null>(null)
 /** 快捷表情。 */
@@ -519,6 +525,67 @@ async function toggleReaction(message: MessageItem, emoji: string) {
   }
 }
 
+/** 搜索消息（防抖 300ms，跨会话）。 */
+function onSearchInput() {
+  clearTimeout(searchTimer)
+  const q = searchQuery.value.trim()
+  if (!q) {
+    searchResults.value = []
+    return
+  }
+  searchTimer = setTimeout(() => void runSearch(), 300)
+}
+
+/** 执行搜索。 */
+async function runSearch() {
+  const q = searchQuery.value.trim()
+  if (!q) {
+    searchResults.value = []
+    return
+  }
+  searching.value = true
+  error.value = ''
+  try {
+    searchResults.value = await api<Array<MessageItem & { conversationId: string }>>(
+      'search/messages',
+      { params: { q, limit: 20 } },
+    )
+    await resolveUsers(searchResults.value.map((row) => row.senderId ?? ''))
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  } finally {
+    searching.value = false
+  }
+}
+
+/** 关闭搜索并清空结果。 */
+function closeSearch() {
+  searchOpen.value = false
+  searchQuery.value = ''
+  searchResults.value = []
+}
+
+/** 跳到搜索结果：必要时补拉消息窗口，再滚动高亮。 */
+async function openSearchResult(hit: MessageItem & { conversationId: string }) {
+  if (hit.conversationId !== activeId.value) {
+    await openConversation(hit.conversationId)
+  }
+  closeSearch()
+  if (!messages.value.some((item) => item.id === hit.id)) {
+    try {
+      messages.value = await api<MessageItem[]>(
+        `conversations/${hit.conversationId}/messages?beforeSeq=${hit.seq + 1}&limit=100`,
+      )
+      await resolveUsers(messages.value.map((item) => item.senderId ?? ''))
+    } catch (err) {
+      error.value = apiErrorMessage(err)
+      return
+    }
+  }
+  await nextTick()
+  jumpToMessage(hit.id)
+}
+
 /** 统计自己最近一条消息在群里的已读人数。 */
 async function loadReceipts() {
   receipts.value = null
@@ -699,17 +766,68 @@ onUnmounted(() => {
           <h1 class="text-[13px] font-medium text-[var(--text-strong)]">消息</h1>
           <span class="text-[11px] text-neutral-400">{{ conversations.length }}</span>
         </div>
-        <button
-          class="rounded-[var(--radius-field)] p-1 text-neutral-400 transition hover:bg-[var(--surface-hover)] hover:text-neutral-600"
-          title="发起会话"
-          aria-label="发起会话"
-          @click="createOpen = true"
-        >
-          <AppIcon name="plus" class="size-4" />
-        </button>
+        <div class="flex items-center gap-0.5">
+          <button
+            class="rounded-[var(--radius-field)] p-1 text-neutral-400 transition hover:bg-[var(--surface-hover)] hover:text-neutral-600"
+            title="搜索消息"
+            aria-label="搜索消息"
+            @click="searchOpen = !searchOpen"
+          >
+            <AppIcon name="search" class="size-4" />
+          </button>
+          <button
+            class="rounded-[var(--radius-field)] p-1 text-neutral-400 transition hover:bg-[var(--surface-hover)] hover:text-neutral-600"
+            title="发起会话"
+            aria-label="发起会话"
+            @click="createOpen = true"
+          >
+            <AppIcon name="plus" class="size-4" />
+          </button>
+        </div>
       </div>
 
-      <div class="flex-1 overflow-y-auto px-1.5 pb-2">
+      <div v-if="searchOpen" class="px-2 pb-2">
+        <input
+          v-model="searchQuery"
+          autofocus
+          placeholder="搜索全部会话消息"
+          class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 text-[12px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+          @input="onSearchInput"
+        />
+      </div>
+
+      <div v-if="searchOpen && searchQuery.trim()" class="flex-1 overflow-y-auto px-1.5 pb-2">
+        <p v-if="searching" class="px-3 py-6 text-center text-[11px] text-neutral-400">搜索中…</p>
+        <p
+          v-else-if="searchResults.length === 0"
+          class="px-3 py-6 text-center text-[11px] text-neutral-400"
+        >
+          没有找到包含「{{ searchQuery.trim() }}」的消息
+        </p>
+        <template v-else>
+          <button
+            v-for="hit in searchResults"
+            :key="hit.id"
+            class="mb-0.5 block w-full rounded-[var(--radius-field)] px-2 py-2 text-left transition-colors hover:bg-[var(--surface-hover)]"
+            @click="openSearchResult(hit)"
+          >
+            <span class="flex items-center justify-between gap-2 text-[11px] text-neutral-400">
+              <span class="truncate">
+                {{ conversations.find((item) => item.id === hit.conversationId)?.name ?? '私聊' }}
+              </span>
+              <span class="shrink-0">{{ timeOf(hit.createdAt) }}</span>
+            </span>
+            <span class="mt-0.5 block truncate text-[12px] text-[var(--text-strong)]">
+              {{ hit.content?.text }}
+            </span>
+            <span class="mt-0.5 block text-[10px] text-neutral-400">
+              {{ users[hit.senderId ?? '']?.nickname ?? '成员' }}
+            </span>
+          </button>
+        </template>
+      </div>
+
+      <div v-else class="flex-1 overflow-y-auto px-1.5 pb-2">
         <button
           v-for="conversation in sortedConversations"
           :key="conversation.id"

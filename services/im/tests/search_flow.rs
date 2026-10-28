@@ -76,7 +76,12 @@ fn texts(results: &Value) -> Vec<String> {
         .as_array()
         .expect("结果数组")
         .iter()
-        .map(|row| row["content"]["text"].as_str().unwrap_or_default().to_string())
+        .map(|row| {
+            row["content"]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
         .collect()
 }
 
@@ -132,7 +137,13 @@ async fn conversation_search_is_scoped_and_member_only() {
     let other_conversation = create_group(&app, &owner_token, &[member], "会话 B").await;
 
     send(&app, &owner_token, &conversation_id, "A 里的关键词 alpha").await;
-    send(&app, &owner_token, &other_conversation, "B 里的关键词 alpha").await;
+    send(
+        &app,
+        &owner_token,
+        &other_conversation,
+        "B 里的关键词 alpha",
+    )
+    .await;
 
     let hit = search_in(&app, &owner_token, &conversation_id, "alpha").await;
     let results = hit.expect(StatusCode::OK);
@@ -153,7 +164,8 @@ async fn global_search_only_returns_my_conversations() {
     let member_token = issue_token(&app, member);
     let outsider_token = issue_token(&app, outsider);
     let conversation_id = create_group(&app, &owner_token, &[member], "全员群").await;
-    let private_conversation = create_group(&app, &owner_token, &[], "只有群主").await;
+    let private_conversation =
+        create_group(&app, &owner_token, &[Uuid::now_v7()], "小范围群").await;
 
     send(&app, &owner_token, &conversation_id, "公告：年会报名开始").await;
     send(
@@ -183,10 +195,16 @@ async fn search_validates_query_and_limit() {
     let app = spawn().await;
     let owner = Uuid::now_v7();
     let owner_token = issue_token(&app, owner);
-    let conversation_id = create_group(&app, &owner_token, &[], "校验群").await;
+    let conversation_id = create_group(&app, &owner_token, &[Uuid::now_v7()], "校验群").await;
 
     for text in ["一", "二", "三"] {
-        send(&app, &owner_token, &conversation_id, &format!("关键词 {text}")).await;
+        send(
+            &app,
+            &owner_token,
+            &conversation_id,
+            &format!("关键词 {text}"),
+        )
+        .await;
     }
 
     // 空关键词

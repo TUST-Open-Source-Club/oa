@@ -1,10 +1,11 @@
 //! 数据访问层：只操作 im schema。
 
 use chrono::{DateTime, Utc};
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, Value as SqlValue};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseBackend, DatabaseConnection,
-    DbErr, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement, TransactionTrait,
+    DbErr, EntityTrait, FromQueryResult, QueryFilter, QueryOrder, QuerySelect, Set, Statement,
+    TransactionTrait,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -780,4 +781,54 @@ pub async fn reactions_for_messages(
         }
     }
     Ok(grouped)
+}
+
+/// 在给定会话集合中搜索正文（大小写不敏感的子串匹配，按 seq 倒序）。
+///
+/// 关键词里的 LIKE 通配符会被转义（Postgres 默认转义符为反斜杠），按字面匹配。
+pub async fn search_messages(
+    db: &DatabaseConnection,
+    conversation_ids: &[Uuid],
+    query: &str,
+    limit: u64,
+) -> Result<Vec<message::Model>, AppError> {
+    if conversation_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let escaped = query
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let placeholders = (1..=conversation_ids.len())
+        .map(|index| format!("${index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let query_index = conversation_ids.len() + 1;
+    let limit_index = conversation_ids.len() + 2;
+    let sql = format!(
+        "SELECT id, conversation_id, seq, sender_id, type, content, reply_to_id, \
+                client_msg_id, mentions, thread_root_id, edited_at, status, recalled_at, created_at \
+         FROM messages \
+         WHERE conversation_id IN ({placeholders}) \
+           AND status <> 'recalled' \
+           AND (content->>'text') ILIKE ${query_index} \
+         ORDER BY seq DESC LIMIT ${limit_index}"
+    );
+    let mut values: Vec<SqlValue> = conversation_ids
+        .iter()
+        .map(|id| SqlValue::Uuid(Some(*id)))
+        .collect();
+    values.push(SqlValue::String(Some(format!("%{escaped}%"))));
+    values.push(SqlValue::BigInt(Some(limit as i64)));
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            sql,
+            values,
+        ))
+        .await
+        .map_err(map_db_err)?;
+    rows.iter()
+        .map(|row| message::Model::from_query_result(row, "").map_err(map_db_err))
+        .collect()
 }

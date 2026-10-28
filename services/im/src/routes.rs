@@ -46,6 +46,8 @@ fn user_id_of(auth: &AuthUser) -> Result<Uuid, AppError> {
 pub struct MessageDto {
     /// ID。
     pub id: String,
+    /// 所属会话。
+    pub conversation_id: String,
     /// 会话内序号。
     pub seq: i64,
     /// 发送者。
@@ -77,6 +79,7 @@ impl From<&message::Model> for MessageDto {
     fn from(model: &message::Model) -> Self {
         Self {
             id: model.id.to_string(),
+            conversation_id: model.conversation_id.to_string(),
             seq: model.seq,
             sender_id: model.sender_id.map(|id| id.to_string()),
             kind: model.r#type.clone(),
@@ -939,6 +942,46 @@ pub async fn toggle_reaction(
     ))
 }
 
+/// 搜索参数。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchQuery {
+    /// 关键词。
+    pub q: String,
+    /// 条数。
+    pub limit: Option<u64>,
+}
+
+/// `GET /conversations/{id}/messages/search`：会话内搜索。
+pub async fn search_in_conversation(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(conversation_id): Path<Uuid>,
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<Vec<MessageDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
+    let items =
+        crate::service::search_messages(&state, &[conversation_id], &query.q, query.limit).await?;
+    Ok(Json(items.iter().map(MessageDto::from).collect()))
+}
+
+/// `GET /search/messages`：跨会话搜索（仅自己参与的会话）。
+pub async fn search_messages(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<Vec<MessageDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let conversations = repo::list_conversations(&state.db, user_id).await?;
+    let ids: Vec<Uuid> = conversations
+        .iter()
+        .map(|row| row.conversation.id)
+        .collect();
+    let items = crate::service::search_messages(&state, &ids, &query.q, query.limit).await?;
+    Ok(Json(items.iter().map(MessageDto::from).collect()))
+}
+
 /// `/api/v1/im` 路由。
 pub fn router() -> Router<SharedState> {
     Router::new()
@@ -982,6 +1025,11 @@ pub fn router() -> Router<SharedState> {
             "/conversations/{id}/members/{user_id}",
             delete(remove_member),
         )
+        .route(
+            "/conversations/{id}/messages/search",
+            get(search_in_conversation),
+        )
+        .route("/search/messages", get(search_messages))
         .route("/conversations/{id}/read", post(mark_read))
         .route(
             "/conversations/{id}/members/{user_id}/mute",

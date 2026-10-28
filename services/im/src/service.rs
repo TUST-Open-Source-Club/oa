@@ -265,3 +265,34 @@ pub async fn toggle_reaction(
     let mut grouped = repo::reactions_for_messages(&state.db, &[message_id]).await?;
     Ok(grouped.remove(&message_id).unwrap_or_default())
 }
+
+/// 搜索关键词的最大长度。
+pub const MAX_SEARCH_QUERY_CHARS: usize = 100;
+/// 搜索结果默认与最大条数。
+pub const DEFAULT_SEARCH_LIMIT: u64 = 20;
+/// 搜索结果上限。
+pub const MAX_SEARCH_LIMIT: u64 = 50;
+
+/// 在指定会话集合中搜索消息（调用方负责成员校验）。
+pub async fn search_messages(
+    state: &SharedState,
+    conversation_ids: &[Uuid],
+    query: &str,
+    limit: Option<u64>,
+) -> Result<Vec<message::Model>, AppError> {
+    let query = query.trim();
+    if query.is_empty() || query.chars().count() > MAX_SEARCH_QUERY_CHARS {
+        return Err(AppError::unprocessable(
+            "IM_VALIDATION",
+            "搜索关键词不合法",
+            vec![FieldError::new(
+                "q",
+                format!("不能为空，且不超过 {MAX_SEARCH_QUERY_CHARS} 字"),
+            )],
+        ));
+    }
+    let limit = limit
+        .unwrap_or(DEFAULT_SEARCH_LIMIT)
+        .clamp(1, MAX_SEARCH_LIMIT);
+    repo::search_messages(&state.db, conversation_ids, query, limit).await
+}
