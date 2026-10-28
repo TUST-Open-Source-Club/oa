@@ -27,6 +27,7 @@ interface ConversationItem {
   notice?: string | null
   onlyAdminsSpeak?: boolean
   unread: number
+  hasMention?: boolean
   memberIds: string[]
   lastMessage: MessageItem | null
   updatedAt: string
@@ -75,6 +76,14 @@ const groupSettings = reactive({ onlyAdminsSpeak: false, notice: '' })
 const myRole = computed(() => members.value.find((row) => row.userId === auth.user?.id)?.role ?? 'member')
 const isGroupAdmin = computed(() => ['owner', 'admin'].includes(myRole.value))
 const isOwner = computed(() => myRole.value === 'owner')
+
+/** 会话排序：有未读 @ 的置顶，其次按更新时间倒序。 */
+const sortedConversations = computed(() =>
+  [...conversations.value].sort((a, b) => {
+    if (Boolean(a.hasMention) !== Boolean(b.hasMention)) return a.hasMention ? -1 : 1
+    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  }),
+)
 
 const active = computed(() => conversations.value.find((item) => item.id === activeId.value) ?? null)
 
@@ -475,7 +484,7 @@ onUnmounted(() => {
 
       <div class="flex-1 overflow-y-auto px-1.5 pb-2">
         <button
-          v-for="conversation in conversations"
+          v-for="conversation in sortedConversations"
           :key="conversation.id"
           class="mb-0.5 flex w-full items-center gap-2.5 rounded-[var(--radius-field)] px-2 py-2 text-left transition-colors"
           :class="
@@ -489,8 +498,18 @@ onUnmounted(() => {
           <UserAvatar :name="titleOf(conversation)" :seed="conversation.id" />
           <span class="min-w-0 flex-1">
             <span class="flex items-center justify-between gap-2">
-              <span class="truncate text-[13px] font-medium text-[var(--text-strong)]">
-                {{ titleOf(conversation) }}
+              <span class="flex min-w-0 items-center gap-1">
+                <span
+                  class="truncate text-[13px] text-[var(--text-strong)]"
+                  :class="conversation.hasMention ? 'font-semibold' : 'font-medium'"
+                >
+                  {{ titleOf(conversation) }}
+                </span>
+                <span
+                  v-if="conversation.hasMention"
+                  class="shrink-0 rounded bg-primary-500/15 px-1 text-[10px] font-medium text-primary-700 dark:text-primary-200"
+                  title="有人@了你"
+                >@</span>
               </span>
               <span class="shrink-0 text-[10px] text-neutral-400">
                 {{ conversation.lastMessage ? timeOf(conversation.lastMessage.createdAt) : '' }}
