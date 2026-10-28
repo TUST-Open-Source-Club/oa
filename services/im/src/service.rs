@@ -81,6 +81,8 @@ pub async fn create_message(
             "resource": { "type": "im", "id": conversation_id, "url": format!("/im/{conversation_id}") },
             "title": title,
             "body": domain::preview_of(&model.r#type, &model.content),
+            // 供 notify 判断是否要发「@了你 / @所有人」提醒
+            "mentions": model.mentions,
             "priority": "high"
         });
         if let Err(err) =
