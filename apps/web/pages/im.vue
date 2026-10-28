@@ -16,6 +16,7 @@ interface MessageItem {
   senderId: string | null
   type: string
   content: { text?: string }
+  mentions?: string[]
   createdAt: string
 }
 /** 会话条目。 */
@@ -50,6 +51,12 @@ const listEl = ref<HTMLElement | null>(null)
 const createOpen = ref(false)
 const pickedIds = ref<string[]>([])
 const groupName = ref('')
+const mentionOpen = ref(false)
+const mentionQuery = ref('')
+const mentionIndex = ref(0)
+/** 已选提及：ID → 昵称；'@all' 表示所有人。 */
+const pendingMentions = ref<Record<string, string>>({})
+
 const msgMenu = reactive<{ open: boolean; x: number; y: number; message: MessageItem | null }>({
   open: false,
   x: 0,
@@ -152,6 +159,82 @@ async function openConversation(id: string) {
 }
 
 /** 发送文本消息。 */
+/** @ 候选：会话成员（排除自己），群主/管理员额外可 @所有人。 */
+const mentionCandidates = computed(() => {
+  const current = active.value
+  if (!current) return [] as Array<{ id: string; name: string }>
+  const q = mentionQuery.value.trim().toLowerCase()
+  const items = current.memberIds
+    .filter((id) => id !== auth.user?.id)
+    .map((id) => ({ id, name: users.value[id]?.nickname ?? id }))
+    .filter((item) => !q || item.name.toLowerCase().includes(q))
+  const canAll =
+    current.type === 'group' &&
+    isGroupAdmin.value &&
+    (!q || '所有人'.includes(q) || 'all'.includes(q))
+  return canAll ? [{ id: '@all', name: '所有人' }, ...items] : items
+})
+
+/** 插入选中的提及。 */
+function applyMention(id: string, name: string) {
+  const at = text.value.lastIndexOf('@')
+  text.value = `${text.value.slice(0, at)}@${name} `
+  pendingMentions.value[id] = name
+  mentionOpen.value = false
+  mentionQuery.value = ''
+  mentionIndex.value = 0
+}
+
+/** 输入时识别 @ 片段。 */
+function onTextInput() {
+  const value = text.value
+  const at = value.lastIndexOf('@')
+  const segment = at >= 0 ? value.slice(at + 1) : ''
+  const trigger = at >= 0 && !/\s/.test(segment) && segment.length <= 12
+  mentionOpen.value = trigger
+  mentionQuery.value = trigger ? segment : ''
+  mentionIndex.value = 0
+}
+
+/** 提及候选键盘导航；返回 true 表示事件已消费。 */
+function onMentionKeydown(event: KeyboardEvent): boolean {
+  if (!mentionOpen.value) return false
+  const list = mentionCandidates.value
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    mentionIndex.value = (mentionIndex.value + step + list.length) % Math.max(list.length, 1)
+    return true
+  }
+  if (event.key === 'Enter' || event.key === 'Tab') {
+    const picked = list[mentionIndex.value]
+    if (picked) {
+      event.preventDefault()
+      applyMention(picked.id, picked.name)
+      return true
+    }
+  }
+  if (event.key === 'Escape') mentionOpen.value = false
+  return false
+}
+
+/** 删除文本后同步清理无效提及。 */
+function syncPendingMentions() {
+  for (const [id, name] of Object.entries(pendingMentions.value)) {
+    const token = id === '@all' ? '@所有人' : `@${name}`
+    if (!text.value.includes(token)) delete pendingMentions.value[id]
+  }
+}
+
+/** 输入框键盘：先给提及面板，再走 Enter 发送。 */
+function onComposerKeydown(event: KeyboardEvent) {
+  if (onMentionKeydown(event)) return
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    void send()
+  }
+}
+
 async function send() {
   const content = text.value.trim()
   if (!content || !activeId.value || sending.value) return
@@ -160,9 +243,11 @@ async function send() {
   try {
     await api(`conversations/${activeId.value}/messages`, {
       method: 'POST',
-      body: { type: 'text', content: { text: content } },
+      body: { type: 'text', content: { text: content }, mentions: Object.keys(pendingMentions.value) },
     })
     text.value = ''
+    pendingMentions.value = {}
+    mentionOpen.value = false
     await loadMessages()
     await loadConversations()
   } catch (err) {
@@ -470,9 +555,17 @@ onUnmounted(() => {
               "
               @contextmenu.prevent="openMsgMenu($event, message)"
             >
-              <p class="mb-0.5 text-[10px] opacity-60">
+              <p class="mb-0.5 flex items-center gap-1 text-[10px] opacity-60">
                 {{ message.senderId === auth.user?.id ? '我' : (users[message.senderId ?? '']?.nickname ?? '系统') }}
                 · {{ timeOf(message.createdAt) }}
+                <span
+                  v-if="message.mentions?.includes('@all')"
+                  class="rounded bg-white/20 px-1 text-[10px] not-italic"
+                >@所有人</span>
+                <span
+                  v-else-if="message.mentions?.includes(auth.user?.id ?? '')"
+                  class="rounded bg-white/20 px-1 text-[10px] not-italic"
+                >提到了你</span>
               </p>
               <p class="break-words whitespace-pre-wrap">{{ message.content?.text }}</p>
             </div>
@@ -484,13 +577,30 @@ onUnmounted(() => {
 
         <footer class="border-t border-[var(--border)] px-3 py-2.5">
           <p v-if="error" class="mb-2 text-[11px] text-danger-500">{{ error }}</p>
-          <div class="flex items-end gap-2">
+          <div class="relative flex items-end gap-2">
+            <div
+              v-if="mentionOpen && mentionCandidates.length"
+              class="absolute bottom-full left-0 z-30 mb-1 max-h-48 w-56 overflow-y-auto rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[var(--shadow-pop)]"
+            >
+              <button
+                v-for="(item, index) in mentionCandidates"
+                :key="item.id"
+                type="button"
+                class="flex w-full items-center gap-2 rounded-[var(--radius-field)] px-2 py-1.5 text-left text-[12px]"
+                :class="index === mentionIndex ? 'bg-[var(--surface-hover)] text-[var(--text-strong)]' : 'text-neutral-600 dark:text-neutral-300'"
+                @click="applyMention(item.id, item.name)"
+              >
+                <span class="truncate">@{{ item.name }}</span>
+                <span v-if="item.id === '@all'" class="ml-auto text-[10px] text-neutral-400">群主/管理员</span>
+              </button>
+            </div>
             <textarea
               v-model="text"
               rows="1"
               placeholder="输入消息，Enter 发送"
               class="max-h-32 min-h-9 flex-1 resize-none rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-2 text-[13px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
-              @keydown.enter.exact.prevent="send"
+              @input="onTextInput(); syncPendingMentions()"
+              @keydown="onComposerKeydown"
             />
             <Button :disabled="!text.trim() || sending" @click="send">
               <AppIcon name="send" class="size-4" />
