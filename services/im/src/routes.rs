@@ -1026,6 +1026,164 @@ pub async fn download_file(
         .into_response())
 }
 
+/// 导出查询参数。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportQuery {
+    /// md（默认）/ json。
+    pub format: Option<String>,
+}
+
+/// 导出消息上限。
+pub const MAX_EXPORT_MESSAGES: u64 = 20_000;
+
+/// 消息在导出文本里的正文摘要。
+fn export_body(message: &message::Model) -> String {
+    if message.status == "recalled" {
+        return "（已撤回）".to_string();
+    }
+    match message.r#type.as_str() {
+        "text" => message
+            .content
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        "image" => format!("[图片] {}", attachment_names(message)),
+        "file" => format!("[文件] {}", attachment_names(message)),
+        other => format!("[{other}]"),
+    }
+}
+
+/// 附件文件名（逗号分隔）。
+fn attachment_names(message: &message::Model) -> String {
+    message
+        .content
+        .get("attachments")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("name").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("、")
+        })
+        .unwrap_or_default()
+}
+
+/// 渲染 Markdown 导出（线程回复缩进显示在根消息后）。
+fn render_markdown(conversation: &conversation::Model, messages: &[message::Model]) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "# {}\n\n",
+        conversation.name.as_deref().unwrap_or("私聊")
+    ));
+    out.push_str(&format!(
+        "> 导出时间：{} · 消息数：{}\n\n",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
+        messages.len()
+    ));
+    for root in messages.iter().filter(|item| item.thread_root_id.is_none()) {
+        push_markdown_message(&mut out, root, 0);
+        for reply in messages
+            .iter()
+            .filter(|item| item.thread_root_id == Some(root.id))
+        {
+            push_markdown_message(&mut out, reply, 1);
+        }
+    }
+    out
+}
+
+/// 追加一条消息到 Markdown。
+fn push_markdown_message(out: &mut String, message: &message::Model, depth: usize) {
+    let indent = if depth == 0 { "" } else { "  > " };
+    let prefix = if depth == 0 { "###" } else { ">" };
+    let edited = if message.edited_at.is_some() {
+        "（已编辑）"
+    } else {
+        ""
+    };
+    out.push_str(&format!(
+        "{indent}{prefix} {} · `{}` · {}{edited}\n{indent}\n",
+        message.created_at.format("%Y-%m-%d %H:%M"),
+        message
+            .sender_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "系统".to_string()),
+        message.r#type,
+    ));
+    for line in export_body(message).lines() {
+        out.push_str(&format!("{indent}{line}\n"));
+    }
+    out.push('\n');
+}
+
+/// `GET /conversations/{id}/export?format=md|json`：导出会话（成员可导出，写审计）。
+pub async fn export_conversation(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(conversation_id): Path<Uuid>,
+    Query(query): Query<ExportQuery>,
+) -> Result<Response, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let ctx = repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
+    let format = query.format.as_deref().unwrap_or("md");
+    if !matches!(format, "md" | "json") {
+        return Err(AppError::unprocessable(
+            "IM_VALIDATION",
+            "导出格式不支持",
+            vec![FieldError::new("format", "仅支持 md / json")],
+        ));
+    }
+    let messages = repo::list_all_messages(&state.db, conversation_id, MAX_EXPORT_MESSAGES).await?;
+    let (content_type, body, extension) = if format == "md" {
+        (
+            "text/markdown; charset=utf-8",
+            render_markdown(&ctx.conversation, &messages),
+            "md",
+        )
+    } else {
+        let payload = json!({
+            "conversation": {
+                "id": ctx.conversation.id,
+                "type": ctx.conversation.r#type,
+                "name": ctx.conversation.name,
+                "notice": ctx.conversation.notice,
+                "createdAt": ctx.conversation.created_at,
+            },
+            "messages": messages.iter().map(MessageDto::from).collect::<Vec<_>>(),
+        });
+        let text = serde_json::to_string_pretty(&payload).map_err(AppError::internal)?;
+        ("application/json; charset=utf-8", text, "json")
+    };
+    if let Err(err) = club_bus::audit::record(
+        &state.db,
+        "im_conversation",
+        &conversation_id.to_string(),
+        "export",
+        None,
+        Some(json!({ "format": format, "messageCount": messages.len() })),
+        Some(user_id),
+        state.now(),
+    )
+    .await
+    {
+        tracing::warn!(error = %err, "写导出审计失败");
+    }
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type.to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"conversation-{conversation_id}.{extension}\""),
+            ),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 /// 置顶请求。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1296,6 +1454,7 @@ pub fn router() -> Router<SharedState> {
             post(toggle_star),
         )
         .route("/messages/starred", get(list_starred))
+        .route("/conversations/{id}/export", get(export_conversation))
         .route("/uploads", post(upload_file))
         .route("/files/{id}", get(download_file))
         .route("/conversations/{id}/notify", post(set_notify_level))

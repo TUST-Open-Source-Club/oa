@@ -225,6 +225,7 @@ pub mod domain;
 pub mod entity;
 pub mod migration;
 pub mod migration10;
+pub mod migration11;
 pub mod migration2;
 pub mod migration3;
 pub mod migration4;

@@ -841,6 +841,27 @@ async function toggleStar(message: MessageItem) {
   }
 }
 
+/** 导出会话为 Markdown / JSON（带鉴权，下载 blob）。 */
+async function exportConversation(conversation: ConversationItem, format: 'md' | 'json') {
+  closeMenus()
+  error.value = ''
+  try {
+    const blob = await $fetch<Blob>(`/api/im/conversations/${conversation.id}/export`, {
+      params: { format },
+      headers: auth.authHeaders(),
+      responseType: 'blob',
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `conversation-${conversation.id}.${format}`
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  }
+}
+
 /** 设置会话通知级别（all / mentions / mute）。 */
 async function setNotifyLevel(conversation: ConversationItem, level: string) {
   error.value = ''
@@ -1353,6 +1374,19 @@ onUnmounted(() => {
       </button>
       <button class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]" @click="markConversationRead(convMenu.conversation!)">
         标记已读
+      </button>
+      <div class="my-1 border-t border-[var(--border)]" />
+      <button
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="exportConversation(convMenu.conversation!, 'md')"
+      >
+        导出 Markdown
+      </button>
+      <button
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="exportConversation(convMenu.conversation!, 'json')"
+      >
+        导出 JSON
       </button>
       <div class="my-1 border-t border-[var(--border)]" />
       <p class="px-3 pb-0.5 pt-1 text-[10px] text-neutral-400">通知</p>

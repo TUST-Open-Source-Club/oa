@@ -172,13 +172,11 @@ async fn export_json_has_conversation_and_messages() {
     )
     .await;
     assert_eq!(export.status, StatusCode::OK);
-    assert!(
-        export
-            .content_type
-            .as_deref()
-            .unwrap_or_default()
-            .starts_with("application/json")
-    );
+    assert!(export
+        .content_type
+        .as_deref()
+        .unwrap_or_default()
+        .starts_with("application/json"));
     let body: serde_json::Value = serde_json::from_str(&export.body).expect("合法 JSON");
     assert_eq!(body["conversation"]["id"], conversation_id);
     assert_eq!(body["conversation"]["name"], "导出测试群");
@@ -232,10 +230,9 @@ async fn export_is_audited() {
     )
     .await;
 
-    let entries =
-        club_bus::audit::list_for(&app.state.db, "im_conversation", &conversation_id, 10)
-            .await
-            .expect("读取审计");
+    let entries = club_bus::audit::list_for(&app.state.db, "im_conversation", &conversation_id, 10)
+        .await
+        .expect("读取审计");
     assert_eq!(entries.len(), 1, "应记录一次导出");
     assert_eq!(entries[0].action, "export");
     assert_eq!(entries[0].actor_id, Some(owner));

@@ -1002,3 +1002,18 @@ pub async fn list_starred(
         .map(|row| message::Model::from_query_result(row, "").map_err(map_db_err))
         .collect()
 }
+
+/// 导出用：按 seq 升序读取会话全部消息（含线程回复，有上限）。
+pub async fn list_all_messages(
+    db: &DatabaseConnection,
+    conversation_id: Uuid,
+    limit: u64,
+) -> Result<Vec<message::Model>, AppError> {
+    message::Entity::find()
+        .filter(message::Column::ConversationId.eq(conversation_id))
+        .order_by_asc(message::Column::Seq)
+        .limit(limit)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}

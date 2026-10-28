@@ -178,3 +178,15 @@
 - 前端：会话右键「置顶/取消置顶」（列表排序：置顶 > 未读 @ > 更新时间，带「置顶」标记）；
   消息右键「收藏/取消收藏」，气泡时间行显示 ★；
 - 用例：`services/im/tests/pin_star_flow.rs`（3 条）。
+
+### 7.11 会话导出与审计（P2，已完成）
+
+- `GET /conversations/{cid}/export?format=md|json`（成员可导出，上限 20000 条）；
+- Markdown：`# 群名` + 导出时间/条数 + 按 seq 正序的消息（时间、发送者、类型、正文，
+  编辑标「已编辑」、撤回标「（已撤回）」、线程回复缩进在根消息后）；
+- JSON：`{ conversation: {...}, messages: [...] }`，消息为完整 DTO；
+- 响应带 `Content-Disposition: attachment`；非法格式 422；
+- 每次导出写 `change_log`（entity=`im_conversation`, action=`export`, after 含 format/messageCount），
+  迁移 v11 在 im schema 建审计表；
+- 前端：会话右键「导出 Markdown / 导出 JSON」，带鉴权取 blob 后触发下载；
+- 用例：`services/im/tests/export_flow.rs`（4 条）。
