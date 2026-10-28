@@ -449,6 +449,18 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
               </template>
             </template>
           </nav>
+          <template v-if="!showTrash">
+            <label
+              class="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-[var(--radius-field)] bg-primary-600 px-3 text-[13px] font-medium text-white shadow-[var(--shadow-inset)] ring-1 ring-primary-700/30 ring-inset transition hover:bg-primary-700"
+            >
+              <AppIcon name="plus" class="size-3.5" />
+              {{ uploading ? `上传中 ${uploadDone}/${uploadTotal}` : '上传文件' }}
+              <input type="file" class="hidden" multiple :disabled="uploading" @change="onPickFiles" />
+            </label>
+            <Button variant="secondary" size="sm" @click="folderOpen = true">
+              <AppIcon name="folder" class="size-3.5" /> 新建文件夹
+            </Button>
+          </template>
           <div class="flex items-center gap-1.5">
             <div class="relative hidden sm:block">
               <AppIcon name="search" class="absolute top-2 left-2.5 size-4 text-neutral-400" />
@@ -466,18 +478,6 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
               <AppIcon name="board" class="size-4.5" />
             </button>
           </div>
-        </div>
-        <div v-if="!showTrash" class="mt-2 flex flex-wrap items-center gap-2">
-          <label
-            class="inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-field)] bg-primary-600 px-3 py-1.5 text-[13px] font-medium text-white shadow-[var(--shadow-inset)] ring-1 ring-primary-700/30 ring-inset transition hover:bg-primary-700"
-          >
-            <AppIcon name="plus" class="size-4" />
-            {{ uploading ? `上传中 ${uploadDone}/${uploadTotal}` : '上传文件' }}
-            <input type="file" class="hidden" multiple :disabled="uploading" @change="onPickFiles" />
-          </label>
-          <Button variant="secondary" size="sm" @click="folderOpen = true">
-            <AppIcon name="folder" class="size-4" /> 新建文件夹
-          </Button>
         </div>
       </div>
 
@@ -552,7 +552,8 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
                 {{ node.name }}
               </button>
               <p class="mt-0.5 text-xs text-neutral-400">
-                {{ node.kind === 'folder' ? '文件夹' : formatSize(node.size) }}
+                {{ node.kind === 'folder' ? '文件夹' : formatSize(node.size) }} ·
+                {{ new Date(node.createdAt).toLocaleDateString('zh-CN') }}
               </p>
             </div>
           </div>
