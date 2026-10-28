@@ -12,7 +12,9 @@ use uuid::Uuid;
 use club_common::{new_id, AppError};
 
 use crate::domain::unread_of;
-use crate::entity::{conversation, conversation_member, message, message_reaction, message_revision};
+use crate::entity::{
+    conversation, conversation_member, message, message_reaction, message_revision,
+};
 
 /// 将数据库错误映射为统一错误。
 pub fn map_db_err(err: DbErr) -> AppError {

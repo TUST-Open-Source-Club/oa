@@ -930,14 +930,9 @@ pub async fn toggle_reaction(
     Json(input): Json<ReactionRequest>,
 ) -> Result<Json<Value>, AppError> {
     let user_id = user_id_of(&auth)?;
-    let groups = crate::service::toggle_reaction(
-        &state,
-        user_id,
-        conversation_id,
-        message_id,
-        &input.emoji,
-    )
-    .await?;
+    let groups =
+        crate::service::toggle_reaction(&state, user_id, conversation_id, message_id, &input.emoji)
+            .await?;
     crate::realtime::broadcast_reactions(&state, conversation_id, message_id, &groups).await;
     Ok(Json(
         json!({ "reactions": reaction_dtos(&groups, user_id) }),

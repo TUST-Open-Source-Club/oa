@@ -143,8 +143,12 @@ async fn reactions_are_per_emoji() {
     let row = find_in_history(&app, &member_token, &conversation_id, &message_id).await;
     let reactions = row["reactions"].as_array().unwrap();
     assert_eq!(reactions.len(), 2);
-    assert!(reactions.iter().any(|item| item["emoji"] == "👍" && item["count"] == 1));
-    assert!(reactions.iter().any(|item| item["emoji"] == "🎉" && item["count"] == 1));
+    assert!(reactions
+        .iter()
+        .any(|item| item["emoji"] == "👍" && item["count"] == 1));
+    assert!(reactions
+        .iter()
+        .any(|item| item["emoji"] == "🎉" && item["count"] == 1));
 }
 
 #[tokio::test]
