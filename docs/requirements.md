@@ -44,6 +44,7 @@
 | v0.11 | 2026-09-13 | 新增 HarmonyOS NEXT 客户端：PWA 原生壳（ArkTS + ArkWeb + 华为 Push Kit，FCM 不可用直接降级 ntfy） |
 | v0.12 | 2026-09-13 | 所有客户端支持服务器地址配置与切换（不硬编码 Base URL）；Web 同源默认 |
 | v0.13 | 2026-10-27 | 仓库结构改为单仓库 monorepo：合并 12 个组件仓库（快照导入），Rust 单 Cargo workspace + 前端单 pnpm workspace，移除 git submodule；镜像构建上下文改为仓库根目录 |
+| v0.16 | 2026-10-28 | 新增全局登录设备管理：`GET /api/v1/auth/sessions` 列出活跃设备（按刷新令牌 family 聚合，可选 `x-refresh-token` 标记当前设备）、`DELETE /api/v1/auth/sessions/{familyId}` 登出指定设备（吊销整条令牌链）；设置页新增「登录设备」区块 |
 | v0.15 | 2026-10-28 | MinIO 社区版镜像与二进制停止分发（Docker Hub/Quay 无镜像、dl.min.io 返回 410），CI 与本地 S3 集成测试改用 S3 兼容的 `adobe/s3mock`（覆盖预签名 GET/PUT），脚本与文档同步更新 |
 | v0.14 | 2026-10-27 | 质量门禁补强：`apps/web` 的 `nuxt typecheck` 清零并纳入 CI；Rust 覆盖率同时卡「行 + 函数 ≥ 80%」（排除 `main.rs` 与 migrations）；新增 MinIO 服务在 CI 跑 S3 后端集成测试；补 task 服务变更日志/项目管理等集成测试与前端 utils 单测 |
 

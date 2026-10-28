@@ -28,6 +28,33 @@ interface RefreshResponse {
   expiresIn: number
 }
 
+/** 用 UA 粗略标识当前设备（设备管理展示用，不做指纹）。 */
+function browserLabel(): string | undefined {
+  if (typeof navigator === 'undefined') return undefined
+  const ua = navigator.userAgent
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /Chrome\//.test(ua)
+      ? 'Chrome'
+      : /Safari\//.test(ua)
+        ? 'Safari'
+        : /Firefox\//.test(ua)
+          ? 'Firefox'
+          : '浏览器'
+  const os = /iPhone|iPad/.test(ua)
+    ? 'iOS'
+    : /Android/.test(ua)
+      ? 'Android'
+      : /Mac OS X/.test(ua)
+        ? 'macOS'
+        : /Windows/.test(ua)
+          ? 'Windows'
+          : /Linux/.test(ua)
+            ? 'Linux'
+            : ''
+  return os ? `${browser} · ${os}` : browser
+}
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     accessToken: '' as string,
@@ -49,7 +76,7 @@ export const useAuthStore = defineStore('auth', {
     async login(identifier: string, password: string) {
       const response = await $fetch<LoginResponse>('/api/auth/login', {
         method: 'POST',
-        body: { identifier, password },
+        body: { identifier, password, deviceId: browserLabel() },
       })
       this.accessToken = response.accessToken
       this.user = response.user

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 设置页：服务器信息与切换、通知开关、客户端平台、安装引导（需求 13.1.1）。 */
+/** 设置页：服务器信息与切换、登录设备、通知开关、客户端平台、安装引导（需求 13.1.1）。 */
 import { Button } from '@club-oa/ui'
 
 const config = useRuntimeConfig()
@@ -12,9 +12,80 @@ const origin = ref('')
 const pushError = ref('')
 const switching = ref(false)
 
+/** 登录设备。 */
+interface DeviceSession {
+  familyId: string
+  deviceId: string | null
+  userAgent: string | null
+  ip: string | null
+  createdAt: string
+  expiresAt: string
+  current: boolean
+}
+const sessions = ref<DeviceSession[]>([])
+const sessionsLoading = ref(false)
+const sessionError = ref('')
+
+/** 设备友好名称（无 deviceId 时按 UA 猜）。 */
+function deviceLabel(row: DeviceSession) {
+  if (row.deviceId) return row.deviceId
+  const ua = row.userAgent ?? ''
+  if (/iPhone|iPad|iOS/.test(ua)) return 'iOS 设备'
+  if (/Android/.test(ua)) return 'Android 设备'
+  if (/Macintosh|Mac OS/.test(ua)) return 'Mac'
+  if (/Windows/.test(ua)) return 'Windows'
+  if (/Linux/.test(ua)) return 'Linux'
+  return '未知设备'
+}
+
+/** 登录时间显示。 */
+function sessionTime(value: string) {
+  return new Date(value).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/** 拉取登录设备。 */
+async function loadSessions() {
+  sessionsLoading.value = true
+  sessionError.value = ''
+  try {
+    sessions.value = await $fetch<DeviceSession[]>('/api/auth/sessions', {
+      headers: auth.authHeaders(),
+    })
+  } catch (err) {
+    sessionError.value = (err as Error).message
+  } finally {
+    sessionsLoading.value = false
+  }
+}
+
+/** 登出某台设备；若登出的是当前设备，直接回到登录页。 */
+async function revokeSession(row: DeviceSession) {
+  sessionError.value = ''
+  try {
+    await $fetch(`/api/auth/sessions/${row.familyId}`, {
+      method: 'DELETE',
+      headers: auth.authHeaders(),
+    })
+    if (row.current) {
+      await auth.logout()
+      await navigateTo('/login')
+      return
+    }
+    await loadSessions()
+  } catch (err) {
+    sessionError.value = (err as Error).message
+  }
+}
+
 onMounted(() => {
   origin.value = window.location.origin
   setUser(auth.user?.id ?? null)
+  void loadSessions()
 })
 watch(
   () => auth.user?.id,
@@ -78,6 +149,55 @@ async function onSwitchServer() {
           {{ switching ? '正在打开设置页…' : '切换服务器' }}
         </Button>
       </div>
+    </section>
+
+    <!-- 登录设备 -->
+    <section
+      class="overflow-hidden rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-card)]"
+    >
+      <div class="flex items-center justify-between border-b border-[var(--border)] px-4 py-2.5">
+        <h2 class="text-[12px] font-medium text-neutral-500">登录设备</h2>
+        <button
+          type="button"
+          class="text-[11px] text-neutral-400 transition-colors hover:text-primary-600 disabled:opacity-50"
+          :disabled="sessionsLoading"
+          @click="loadSessions"
+        >
+          刷新
+        </button>
+      </div>
+      <p v-if="sessionsLoading" class="px-4 py-6 text-center text-[12px] text-neutral-400">
+        加载中…
+      </p>
+      <p
+        v-else-if="sessions.length === 0"
+        class="px-4 py-6 text-center text-[12px] text-neutral-400"
+      >
+        暂无活跃设备
+      </p>
+      <ul v-else class="divide-y divide-[var(--border)]">
+        <li
+          v-for="row in sessions"
+          :key="row.familyId"
+          class="flex items-center justify-between gap-4 px-4 py-2.5"
+        >
+          <div class="min-w-0">
+            <p class="flex items-center gap-1.5 text-[12px] text-[var(--text-strong)]">
+              <span class="truncate">{{ deviceLabel(row) }}</span>
+              <span
+                v-if="row.current"
+                class="shrink-0 rounded bg-primary-50 px-1 text-[10px] text-primary-700 dark:bg-primary-900/40 dark:text-primary-200"
+              >当前设备</span>
+            </p>
+            <p class="mt-0.5 truncate text-[11px] text-neutral-400">
+              登录于 {{ sessionTime(row.createdAt) }}
+              <template v-if="row.ip"> · {{ row.ip }}</template>
+            </p>
+          </div>
+          <Button variant="secondary" size="sm" @click="revokeSession(row)">登出</Button>
+        </li>
+      </ul>
+      <p v-if="sessionError" class="px-4 pb-3 text-[11px] text-danger-500">{{ sessionError }}</p>
     </section>
 
     <!-- 通知 -->

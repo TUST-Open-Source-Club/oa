@@ -3,10 +3,13 @@
 //! 所有函数把 `sea_orm::DbErr` 统一映射为 [`AppError`]；唯一约束冲突映射为 409。
 
 use chrono::{DateTime, Utc};
+use sea_orm::sea_query::Value as SqlValue;
 use sea_orm::sea_query::{Expr, ExprTrait};
+use sea_orm::ConnectionTrait;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, DbErr, EntityTrait,
-    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseBackend, DatabaseConnection, DbErr,
+    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement,
+    TransactionTrait,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -512,4 +515,83 @@ pub async fn write_audit(
     .await
     .map(|_| ())
     .map_err(map_db_err)
+}
+
+/// 一台活跃登录设备（按刷新令牌 family 聚合）。
+#[derive(Debug, Clone)]
+pub struct SessionRow {
+    /// 令牌链 ID（对外的会话 ID）。
+    pub family_id: Uuid,
+    /// 客户端设备标识。
+    pub device_id: Option<String>,
+    /// User-Agent。
+    pub user_agent: Option<String>,
+    /// 登录 IP。
+    pub ip: Option<String>,
+    /// 该 family 最近一次签发时间。
+    pub created_at: DateTime<Utc>,
+    /// 令牌过期时间。
+    pub expires_at: DateTime<Utc>,
+}
+
+/// 列出用户当前活跃的登录设备（按 family 取最近一条记录）。
+pub async fn list_sessions(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<Vec<SessionRow>, AppError> {
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT family_id, device_id, user_agent, ip, created_at, expires_at FROM (\
+                 SELECT DISTINCT ON (family_id) family_id, device_id, user_agent, ip, created_at, \
+                        expires_at \
+                 FROM refresh_tokens \
+                 WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > $2 \
+                 ORDER BY family_id, created_at DESC\
+             ) latest ORDER BY created_at DESC",
+            vec![
+                SqlValue::Uuid(Some(user_id)),
+                SqlValue::ChronoDateTimeUtc(Some(now)),
+            ],
+        ))
+        .await
+        .map_err(map_db_err)?;
+    let mut result = Vec::with_capacity(rows.len());
+    for row in rows {
+        result.push(SessionRow {
+            family_id: row.try_get_by_index(0).map_err(map_db_err)?,
+            device_id: row.try_get_by_index(1).map_err(map_db_err)?,
+            user_agent: row.try_get_by_index(2).map_err(map_db_err)?,
+            ip: row.try_get_by_index(3).map_err(map_db_err)?,
+            created_at: row
+                .try_get_by_index::<DateTime<Utc>>(4)
+                .map_err(map_db_err)?,
+            expires_at: row
+                .try_get_by_index::<DateTime<Utc>>(5)
+                .map_err(map_db_err)?,
+        });
+    }
+    Ok(result)
+}
+
+/// 登出某台设备（校验 family 属于该用户后吊销整链），返回是否命中。
+pub async fn revoke_family_for_user(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    family_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<bool, AppError> {
+    let hit = refresh_token::Entity::find()
+        .filter(refresh_token::Column::FamilyId.eq(family_id))
+        .filter(refresh_token::Column::UserId.eq(user_id))
+        .filter(refresh_token::Column::RevokedAt.is_null())
+        .one(db)
+        .await
+        .map_err(map_db_err)?;
+    if hit.is_none() {
+        return Ok(false);
+    }
+    revoke_refresh_family(db, family_id, now).await?;
+    Ok(true)
 }

@@ -97,15 +97,9 @@ async fn lists_devices_and_marks_current() {
         .all(|row| row["current"] == false));
 
     // 未登录
-    request(
-        &app.app,
-        "GET",
-        "/api/v1/auth/sessions",
-        None,
-        None,
-    )
-    .await
-    .expect(StatusCode::UNAUTHORIZED);
+    request(&app.app, "GET", "/api/v1/auth/sessions", None, None)
+        .await
+        .expect(StatusCode::UNAUTHORIZED);
 
     let _ = refresh_b;
 }
@@ -117,7 +111,9 @@ async fn revoke_device_kills_its_refresh_token() {
     let (token, _refresh_a) = login(&app, "rev@club.test", "Passw0rd!", "browser-a").await;
     let (_, stale_refresh) = login(&app, "rev@club.test", "Passw0rd!", "browser-b").await;
 
-    let body = list_sessions(&app, &token, None).await.expect(StatusCode::OK);
+    let body = list_sessions(&app, &token, None)
+        .await
+        .expect(StatusCode::OK);
     let stale_family = find_device(&body, "browser-b")["familyId"]
         .as_str()
         .unwrap()
@@ -139,7 +135,9 @@ async fn revoke_device_kills_its_refresh_token() {
     .expect(StatusCode::UNAUTHORIZED);
 
     // 列表只剩另一台
-    let body = list_sessions(&app, &token, None).await.expect(StatusCode::OK);
+    let body = list_sessions(&app, &token, None)
+        .await
+        .expect(StatusCode::OK);
     let rows = body.as_array().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["deviceId"], "browser-a");

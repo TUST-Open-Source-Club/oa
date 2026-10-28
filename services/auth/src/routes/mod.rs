@@ -12,6 +12,7 @@ pub mod guest;
 pub mod health;
 pub mod internal;
 pub mod oidc;
+pub mod sessions;
 
 /// 从请求头提取客户端信息：(IP, User-Agent)。
 ///
@@ -51,6 +52,11 @@ pub fn router() -> Router<SharedState> {
         .route("/me/password", put(auth::change_password))
         .route("/users", get(auth::list_users_by_ids))
         .route("/users/search", get(auth::search_users))
+        .route("/sessions", get(sessions::list_sessions))
+        .route(
+            "/sessions/{family_id}",
+            axum::routing::delete(sessions::revoke_session),
+        )
         // 管理员接口
         .route(
             "/admin/users",
