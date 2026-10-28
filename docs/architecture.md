@@ -475,7 +475,7 @@ services/auth/
 ### 15.3 覆盖率门禁
 
 - 指标：行 / 语句 / 函数覆盖率 ≥ 80%，分支覆盖率 ≥ 70%。
-- Rust：`cargo llvm-cov --workspace --features club-storage/s3 --fail-under-lines 80 --fail-under-functions 80 --ignore-filename-regex '(src/main\.rs|/migration)'`（整仓一次统计，含 MinIO 跑的 S3 后端集成测试；工具通过 `cargo install cargo-llvm-cov` 或 CI action 安装）。
+- Rust：`cargo llvm-cov --workspace --features club-storage/s3 --fail-under-lines 80 --fail-under-functions 80 --ignore-filename-regex '(src/main\.rs|/migration)'`（整仓一次统计，含 s3mock 跑的 S3 后端集成测试；工具通过 `cargo install cargo-llvm-cov` 或 CI action 安装）。
 - 前端：Vitest `coverage.thresholds` 配置 lines/statements/functions = 80，branches = 70，未达标直接失败。
 - 排除项：`migrations/**`、生成的 SDK（`packages/core/sdk`）、纯样式文件、`main.rs` 启动装配——仅允许在覆盖率配置中显式排除，任何新增排除项需在 PR 说明理由。
 - CI 报告（lcov + HTML）作为构建产物上传归档。

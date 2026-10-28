@@ -44,7 +44,7 @@ jobs:
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/club_oa
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/club_oa
       REDIS_TEST_URL: redis://127.0.0.1:6379
-      S3_TEST_ENDPOINT: http://127.0.0.1:9000
+      S3_TEST_ENDPOINT: http://127.0.0.1:9090
       S3_TEST_REGION: us-east-1
       S3_TEST_BUCKET: club-oa-test
       S3_TEST_ACCESS_KEY: minioadmin
@@ -56,23 +56,19 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       # S3 后端集成测试（libs/crates/storage/tests/s3_integration.rs）用。
-      # bitnami/minio 已停止发布（manifest unknown），改用官方镜像 + docker run。
-      - name: 启动 MinIO
+      # MinIO 社区版镜像/二进制已停止分发（Docker Hub / Quay 均 404/401，
+      # dl.min.io 返回 410），改用同为 S3 兼容的 s3mock（支持预签名 GET/PUT）。
+      - name: 启动 S3 兼容存储（s3mock）
         run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data
+          docker run -d --name s3mock -p 9090:9090 \
+            -e COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS=club-oa-test \
+            adobe/s3mock:latest
           for i in $(seq 1 60); do
-            curl -sf http://127.0.0.1:9000/minio/health/live && exit 0
+            curl -sf http://127.0.0.1:9090/ && exit 0
             sleep 1
           done
-          docker logs minio
+          docker logs s3mock
           exit 1
-      - name: 创建测试桶
-        run: |
-          docker run --rm --network host --entrypoint sh minio/mc:latest -c \
-            "mc alias set local http://127.0.0.1:9000 minioadmin minioadmin && mc mb -p local/club-oa-test"
       - name: 格式检查
         run: cargo fmt --all -- --check
       - name: Clippy（-D warnings）

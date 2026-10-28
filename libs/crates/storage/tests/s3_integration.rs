@@ -1,8 +1,8 @@
-//! S3 后端集成测试（需要 MinIO/本地 S3；未配置 `S3_TEST_ENDPOINT` 时跳过）。
+//! S3 后端集成测试（需要 S3 兼容服务；未配置 `S3_TEST_ENDPOINT` 时跳过）。
 //!
 //! 本地运行：
 //! ```bash
-//! ./scripts/s3-test-env.sh          # 启动 MinIO 并建桶
+//! ./scripts/s3-test-env.sh          # 启动 s3mock 并建桶
 //! cargo test --features s3 --test s3_integration
 //! ./scripts/s3-test-env.sh stop
 //! ```

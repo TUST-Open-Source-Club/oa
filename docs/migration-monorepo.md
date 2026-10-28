@@ -82,7 +82,7 @@
 | --- | --- | --- |
 | 格式 | `cargo fmt --all -- --check` | 通过（首次整仓 `cargo fmt` 顺带修复了部分组件此前未格式化的代码） |
 | Lint | `cargo clippy --workspace --all-targets -- -D warnings` | 通过 |
-| Rust 测试 | `cargo test --workspace --features club-storage/s3`（真实 PG 55432 + Redis 56379 + MinIO 59000） | 全部通过：约 210 个用例，含 7 个服务集成测试、S3 后端往返/预签名测试 |
+| Rust 测试 | `cargo test --workspace --features club-storage/s3`（真实 PG 55432 + Redis 56379 + s3mock 59000） | 全部通过：约 210 个用例，含 7 个服务集成测试、S3 后端往返/预签名测试 |
 | 覆盖率 | `cargo llvm-cov --workspace --features club-storage/s3 --fail-under-lines 80 --fail-under-functions 80 --ignore-filename-regex '(src/main\.rs\|/migration)'` | 行 **85.11%**、函数 **81.91%**、区域 81.92%（均 ≥ 80） |
 | 前端安装 | `pnpm install --frozen-lockfile` | 通过（单 `pnpm-lock.yaml`） |
 | 前端类型检查 | `pnpm -r typecheck` | 通过：`packages/core`、`packages/ui`、`apps/web`（原 30 处错误全部消除） |
@@ -92,7 +92,7 @@
 | 编排校验 | `docker compose config`（生产 + 测试两套） | 通过 |
 
 > 覆盖率口径：排除 `src/main.rs`（启动装配）与 `src/migration*`（迁移的 `down()` 不会在启动流程中执行），
-> 与需求 19.3 / 架构 15.3 的排除项一致；S3 后端集成测试在 CI 中由 MinIO 服务提供，因此 `storage/s3.rs` 计入覆盖率。
+> 与需求 19.3 / 架构 15.3 的排除项一致；S3 后端集成测试在 CI 中由 s3mock 服务提供，因此 `storage/s3.rs` 计入覆盖率。
 
 ## 5. 后续操作建议
 

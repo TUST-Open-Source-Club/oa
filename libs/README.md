@@ -34,7 +34,7 @@ cargo test -p club-common -p club-auth-sdk -p club-storage -p club-bus
 cargo llvm-cov --workspace --fail-under-lines 80
 ```
 
-> S3 集成测试在未设置 `S3_TEST_ENDPOINT` 时自动跳过；需要时用 `libs/scripts/s3-test-env.sh start` 起本地 MinIO。
+> S3 集成测试在未设置 `S3_TEST_ENDPOINT` 时自动跳过；需要时用 `libs/scripts/s3-test-env.sh start` 起本地 s3mock。
 
 ## 许可证
 
