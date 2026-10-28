@@ -79,6 +79,8 @@ const mentionIndex = ref(0)
 const pendingMentions = ref<Record<string, string>>({})
 /** 正在引用的消息。 */
 const replyTo = ref<MessageItem | null>(null)
+/** 最近一条自己消息的已读情况。 */
+const receipts = ref<{ read: number; total: number } | null>(null)
 /** 快捷表情。 */
 const QUICK_REACTIONS = ['👍', '🎉', '❤️', '😄', '👀']
 const reactionPending = ref(false)
@@ -178,6 +180,7 @@ async function loadMessages(scroll = true) {
   if (!activeId.value) return
   messages.value = await api<MessageItem[]>(`conversations/${activeId.value}/messages?limit=100`)
   await resolveUsers(messages.value.map((item) => item.senderId ?? ''))
+  await loadReceipts()
   if (scroll) {
     await nextTick()
     listEl.value?.scrollTo({ top: listEl.value.scrollHeight })
@@ -187,6 +190,7 @@ async function loadMessages(scroll = true) {
 /** 打开会话并标记已读（上报已读到的最新 seq）。 */
 async function openConversation(id: string) {
   closeThread()
+  receipts.value = null
   activeId.value = id
   await loadMessages()
   const conversation = conversations.value.find((item) => item.id === id)
@@ -512,6 +516,25 @@ async function toggleReaction(message: MessageItem, emoji: string) {
     error.value = apiErrorMessage(err)
   } finally {
     reactionPending.value = false
+  }
+}
+
+/** 统计自己最近一条消息在群里的已读人数。 */
+async function loadReceipts() {
+  receipts.value = null
+  if (active.value?.type !== 'group') return
+  const latest = [...messages.value].reverse().find((item) => item.senderId === auth.user?.id)
+  if (!latest) return
+  try {
+    const rows = await api<Array<{ userId: string; read: boolean }>>(
+      `conversations/${activeId.value}/messages/${latest.id}/receipts`,
+    )
+    receipts.value = {
+      read: rows.filter((row) => row.read).length,
+      total: rows.length,
+    }
+  } catch {
+    receipts.value = null
   }
 }
 
@@ -861,6 +884,12 @@ onUnmounted(() => {
         </div>
 
         <footer class="border-t border-[var(--border)] px-3 py-2.5">
+          <p
+            v-if="receipts && receipts.total > 0"
+            class="mb-1.5 text-right text-[10px] text-neutral-400"
+          >
+            已读 {{ receipts.read }}/{{ receipts.total }}
+          </p>
           <p v-if="error" class="mb-2 text-[11px] text-danger-500">{{ error }}</p>
           <div
             v-if="replyTo"

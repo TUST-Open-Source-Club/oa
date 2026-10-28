@@ -117,3 +117,9 @@
 - 消息列表与线程回复都带 `reactions`；仅成员可回应，已撤回消息 400，空/含空白 emoji 422；
 - WS 广播 `message_reactions`；前端气泡下展示表情胶囊（自己回应过高亮），右键菜单提供快捷表情；
 - 用例：`services/im/tests/reactions_flow.rs`（3 条）。
+
+### 7.5 已读回执（前端补齐）
+
+- 后端已有 `GET /conversations/{cid}/messages/{mid}/receipts`（成员 → 是否读到该消息）；
+- 前端在群聊输入框上方显示「已读 N/M」：取自己最近一条已加载消息的回执，
+  随 4s 轮询刷新；单聊与无自己消息时不显示。
