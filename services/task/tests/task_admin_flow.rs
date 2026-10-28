@@ -103,8 +103,9 @@ async fn task_get_update_and_delete() {
     let column_id = first_column(&app, &token, &project_id).await;
     add_member(&app, &token, &project_id, peer).await;
 
-    let due = chrono::Utc::now() + chrono::Duration::days(2);
-    let start = chrono::Utc::now();
+    // Postgres timestamptz 只有微秒精度，先截断避免比较失败
+    let due = chrono::SubsecRound::trunc_subsecs(chrono::Utc::now() + chrono::Duration::days(2), 6);
+    let start = chrono::SubsecRound::trunc_subsecs(chrono::Utc::now(), 6);
     let created = create_task(
         &app,
         &token,

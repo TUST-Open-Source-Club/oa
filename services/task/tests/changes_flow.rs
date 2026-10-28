@@ -112,8 +112,10 @@ async fn update_change_is_recorded_and_undone() {
     .await
     .expect(StatusCode::OK);
 
-    let due = chrono::Utc::now() + chrono::Duration::days(3);
-    let start = chrono::Utc::now() + chrono::Duration::hours(2);
+    // Postgres timestamptz 只有微秒精度，这里先截断，避免与回读值比较时因纳秒尾数不等
+    let due = chrono::SubsecRound::trunc_subsecs(chrono::Utc::now() + chrono::Duration::days(3), 6);
+    let start =
+        chrono::SubsecRound::trunc_subsecs(chrono::Utc::now() + chrono::Duration::hours(2), 6);
     let created = create_task(
         &app,
         &token,
@@ -224,7 +226,7 @@ async fn delete_change_restores_task() {
     .await
     .expect(StatusCode::OK);
 
-    let due = chrono::Utc::now() + chrono::Duration::days(1);
+    let due = chrono::SubsecRound::trunc_subsecs(chrono::Utc::now() + chrono::Duration::days(1), 6);
     let created = create_task(
         &app,
         &token,
