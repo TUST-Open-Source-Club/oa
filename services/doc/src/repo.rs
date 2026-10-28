@@ -1,6 +1,7 @@
 //! 数据访问层：只操作 doc schema。
 
 use chrono::{DateTime, Utc};
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, DbErr,
     EntityTrait, QueryFilter, QueryOrder, Set, Statement,
@@ -284,4 +285,125 @@ pub async fn find_version(
 /// 当前位置（数字越小越靠前）。
 pub fn next_position_from(max: Option<i64>) -> i64 {
     max.unwrap_or(0) + 1
+}
+
+/// 计算某节点的全部子孙 ID（仅未删除节点，含自身）。
+pub async fn descendant_ids(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    node_id: Uuid,
+) -> Result<Vec<Uuid>, AppError> {
+    let nodes = list_nodes(db, space_id).await?;
+    let mut children: std::collections::HashMap<Option<Uuid>, Vec<Uuid>> =
+        std::collections::HashMap::new();
+    for node in &nodes {
+        children.entry(node.parent_id).or_default().push(node.id);
+    }
+    let mut result = vec![node_id];
+    let mut index = 0;
+    while index < result.len() {
+        let current = result[index];
+        index += 1;
+        if let Some(kids) = children.get(&Some(current)) {
+            result.extend(kids.iter().copied());
+        }
+    }
+    Ok(result)
+}
+
+/// 更新节点元信息（标题/父节点/排序）。
+pub async fn update_node_meta(
+    db: &DatabaseConnection,
+    node: &node::Model,
+    title: Option<&str>,
+    parent_id: Option<Option<Uuid>>,
+    position: Option<i64>,
+    editor: Uuid,
+    now: DateTime<Utc>,
+) -> Result<node::Model, AppError> {
+    let mut active: node::ActiveModel = node.clone().into();
+    if let Some(title) = title {
+        active.title = Set(title.to_string());
+    }
+    if let Some(parent) = parent_id {
+        // 移动到新父级且未显式指定排序时，排到同级末尾
+        if position.is_none() && parent != node.parent_id {
+            let max_position: Option<i64> = node::Entity::find()
+                .filter(node::Column::SpaceId.eq(node.space_id))
+                .filter(node::Column::DeletedAt.is_null())
+                .filter(match parent {
+                    Some(parent) => node::Column::ParentId.eq(parent),
+                    None => node::Column::ParentId.is_null(),
+                })
+                .order_by_desc(node::Column::Position)
+                .one(db)
+                .await
+                .map_err(map_db_err)?
+                .map(|row| row.position);
+            active.position = Set(max_position.unwrap_or(0) + 1);
+        }
+        active.parent_id = Set(parent);
+    }
+    if let Some(position) = position {
+        active.position = Set(position);
+    }
+    active.updated_by = Set(editor);
+    active.updated_at = Set(now.fixed_offset());
+    active.update(db).await.map_err(map_db_err)
+}
+
+/// 软删节点及其全部子孙。
+pub async fn soft_delete_subtree(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    node_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<u64, AppError> {
+    let ids = descendant_ids(db, space_id, node_id).await?;
+    let result = node::Entity::update_many()
+        .col_expr(node::Column::DeletedAt, Expr::value(now.fixed_offset()))
+        .filter(node::Column::Id.is_in(ids))
+        .filter(node::Column::DeletedAt.is_null())
+        .exec(db)
+        .await
+        .map_err(map_db_err)?;
+    Ok(result.rows_affected)
+}
+
+/// 恢复节点及其全部子孙（含已删除的子孙）。
+pub async fn restore_subtree(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    node_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<u64, AppError> {
+    // 含已删除节点，才能把整棵子树捞回来
+    let nodes = node::Entity::find()
+        .filter(node::Column::SpaceId.eq(space_id))
+        .all(db)
+        .await
+        .map_err(map_db_err)?;
+    let mut children: std::collections::HashMap<Option<Uuid>, Vec<Uuid>> =
+        std::collections::HashMap::new();
+    for node in &nodes {
+        children.entry(node.parent_id).or_default().push(node.id);
+    }
+    let mut ids = vec![node_id];
+    let mut index = 0;
+    while index < ids.len() {
+        let current = ids[index];
+        index += 1;
+        if let Some(kids) = children.get(&Some(current)) {
+            ids.extend(kids.iter().copied());
+        }
+    }
+    let result = node::Entity::update_many()
+        .col_expr(node::Column::DeletedAt, Expr::value(Option::<DateTime<Utc>>::None))
+        .filter(node::Column::Id.is_in(ids))
+        .filter(node::Column::DeletedAt.is_not_null())
+        .exec(db)
+        .await
+        .map_err(map_db_err)?;
+    let _ = now;
+    Ok(result.rows_affected)
 }

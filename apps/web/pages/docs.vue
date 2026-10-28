@@ -13,6 +13,7 @@ interface NodeItem {
   kind: 'folder' | 'page'
   title: string
   version: number
+  position?: number
   children?: NodeItem[]
 }
 interface NodeDetail {
@@ -44,6 +45,19 @@ const historyOpen = ref(false)
 const editorRoot = ref<HTMLElement | null>(null)
 const editorRef = ref<{ getMarkdown?: () => string; failed?: boolean } | null>(null)
 const editing = ref(false)
+
+const treeMenu = reactive<{
+  open: boolean
+  x: number
+  y: number
+  node: NodeItem | null
+}>({ open: false, x: 0, y: 0, node: null })
+const renameOpen = ref(false)
+const renameTitle = ref('')
+const renameTarget = ref<NodeItem | null>(null)
+const moveOpen = ref(false)
+const moveTarget = ref<NodeItem | null>(null)
+const moveParent = ref('')
 
 const createOpen = ref(false)
 const createKind = ref<'page' | 'folder'>('page')
@@ -104,6 +118,126 @@ async function openPage(node: NodeItem) {
   editing.value = false
   versions.value = await api<VersionItem[]>(`spaces/${spaceId.value}/nodes/${node.id}/versions`)
   await loadChanges(node.id)
+}
+
+/** 打开树节点右键菜单。 */
+function openTreeMenu(event: MouseEvent, node: NodeItem) {
+  treeMenu.open = true
+  treeMenu.x = event.clientX
+  treeMenu.y = event.clientY
+  treeMenu.node = node
+}
+
+/** 关闭右键菜单。 */
+function closeTreeMenu() {
+  treeMenu.open = false
+}
+
+/** 开始重命名。 */
+function startRename(node: NodeItem) {
+  closeTreeMenu()
+  renameTarget.value = node
+  renameTitle.value = node.title
+  renameOpen.value = true
+}
+
+/** 提交重命名。 */
+async function submitRename() {
+  const target = renameTarget.value
+  const title = renameTitle.value.trim()
+  if (!target || !title) return
+  errorMessage.value = ''
+  try {
+    await api(`spaces/${spaceId.value}/nodes/${target.id}`, {
+      method: 'PATCH',
+      body: { title },
+    })
+    renameOpen.value = false
+    await loadTree()
+    if (current.value?.id === target.id) current.value.title = title
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  }
+}
+
+/** 开始移动。 */
+function startMove(node: NodeItem) {
+  closeTreeMenu()
+  moveTarget.value = node
+  moveParent.value = node.parentId ?? ''
+  moveOpen.value = true
+}
+
+/** 提交移动。 */
+async function submitMove() {
+  const target = moveTarget.value
+  if (!target) return
+  errorMessage.value = ''
+  try {
+    await api(`spaces/${spaceId.value}/nodes/${target.id}`, {
+      method: 'PATCH',
+      body: { parentId: moveParent.value || null },
+    })
+    moveOpen.value = false
+    await loadTree()
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  }
+}
+
+/** 同级上移 / 下移（交换 position）。 */
+async function moveSibling(node: NodeItem, direction: -1 | 1) {
+  closeTreeMenu()
+  const siblings = siblingsOf(node)
+  const index = siblings.findIndex((item) => item.id === node.id)
+  const other = siblings[index + direction]
+  if (!other) return
+  errorMessage.value = ''
+  try {
+    await api(`spaces/${spaceId.value}/nodes/${node.id}`, {
+      method: 'PATCH',
+      body: { position: other.position ?? index + direction },
+    })
+    await api(`spaces/${spaceId.value}/nodes/${other.id}`, {
+      method: 'PATCH',
+      body: { position: node.position ?? index },
+    })
+    await loadTree()
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  }
+}
+
+/** 取某节点的同级列表（树顺序）。 */
+function siblingsOf(node: NodeItem) {
+  const walk = (items: NodeItem[]): NodeItem[] | null => {
+    if (items.some((item) => item.id === node.id)) return items
+    for (const item of items) {
+      if (item.children?.length) {
+        const hit = walk(item.children)
+        if (hit) return hit
+      }
+    }
+    return null
+  }
+  return walk(tree.value) ?? []
+}
+
+/** 删除节点（软删整棵子树）。 */
+async function deleteNode(node: NodeItem) {
+  closeTreeMenu()
+  if (!window.confirm(`删除「${node.title}」及其子文档？`)) return
+  errorMessage.value = ''
+  try {
+    await api(`spaces/${spaceId.value}/nodes/${node.id}`, { method: 'DELETE' })
+    if (current.value?.id === node.id) {
+      current.value = null
+      draft.value = ''
+    }
+    await loadTree()
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  }
 }
 
 /** 新建页面/文件夹。 */
@@ -256,9 +390,13 @@ function onKeydown(event: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('click', closeTreeMenu)
   void loadSpaces()
 })
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('click', closeTreeMenu)
+})
 </script>
 
 <template>
@@ -307,6 +445,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           "
           :style="{ paddingLeft: `${row.depth * 12 + 6}px` }"
           @click="openPage(row.node)"
+          @contextmenu.prevent="openTreeMenu($event, row.node)"
         >
           <AppIcon
             :name="row.node.kind === 'folder' ? 'folder' : 'doc'"
@@ -332,6 +471,73 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         </Button>
       </div>
     </aside>
+
+    <!-- 树节点右键菜单 -->
+    <div
+      v-if="treeMenu.open && treeMenu.node"
+      class="fixed z-50 w-40 overflow-hidden rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] py-1 text-[13px] shadow-[var(--shadow-pop)]"
+      :style="{ left: `${treeMenu.x}px`, top: `${treeMenu.y}px` }"
+      @click.stop
+    >
+      <button
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="startRename(treeMenu.node!)"
+      >重命名</button>
+      <button
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="startMove(treeMenu.node!)"
+      >移动到…</button>
+      <button
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="moveSibling(treeMenu.node!, -1)"
+      >上移</button>
+      <button
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="moveSibling(treeMenu.node!, 1)"
+      >下移</button>
+      <button
+        class="block w-full px-3 py-1.5 text-left text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-500/10"
+        @click="deleteNode(treeMenu.node!)"
+      >删除</button>
+    </div>
+
+    <!-- 重命名 -->
+    <AppModal :open="renameOpen" title="重命名" @close="renameOpen = false">
+      <input
+        v-model="renameTitle"
+        class="h-9 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 text-[13px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+        @keydown.enter.prevent="submitRename"
+      />
+      <template #footer>
+        <Button variant="secondary" @click="renameOpen = false">取消</Button>
+        <Button :disabled="!renameTitle.trim()" @click="submitRename">保存</Button>
+      </template>
+    </AppModal>
+
+    <!-- 移动 -->
+    <AppModal :open="moveOpen" title="移动到" @close="moveOpen = false">
+      <label class="block text-[12px] text-neutral-500">
+        目标位置（根目录或文件夹）
+        <select
+          v-model="moveParent"
+          class="mt-1.5 h-9 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[13px] text-[var(--text-strong)] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+        >
+          <option value="">根目录</option>
+          <option
+            v-for="folder in folders"
+            :key="folder.id"
+            :value="folder.id"
+            :disabled="folder.id === moveTarget?.id"
+          >
+            {{ folder.label }}
+          </option>
+        </select>
+      </label>
+      <template #footer>
+        <Button variant="secondary" @click="moveOpen = false">取消</Button>
+        <Button @click="submitMove">移动</Button>
+      </template>
+    </AppModal>
 
     <!-- 正文 -->
     <section

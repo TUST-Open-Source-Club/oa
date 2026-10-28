@@ -329,6 +329,132 @@ async fn load_node(
         .ok_or_else(|| AppError::not_found("DOC_NODE_NOT_FOUND", "节点不存在"))
 }
 
+/// 三态 JSON（区分「字段缺省」与「显式 null」）。
+fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// 更新节点元信息请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchNodeRequest {
+    /// 新标题。
+    pub title: Option<String>,
+    /// 新父节点（显式 null 表示移到根）。
+    #[serde(default, deserialize_with = "double_option")]
+    pub parent_id: Option<Option<Uuid>>,
+    /// 同级排序。
+    pub position: Option<i64>,
+}
+
+/// `PATCH /spaces/{id}/nodes/{node_id}`：重命名 / 移动 / 排序。
+pub async fn patch_node(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+    Json(input): Json<PatchNodeRequest>,
+) -> Result<Json<NodeDto>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_editor(&state.db, space_id, user_id).await?;
+    let model = load_node(&state, space_id, node_id).await?;
+
+    let title = match input.title.as_deref() {
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() || trimmed.chars().count() > 255 {
+                return Err(AppError::unprocessable(
+                    "DOC_VALIDATION",
+                    "标题需为 1 ~ 255 字符",
+                    vec![FieldError::new("title", "非法")],
+                ));
+            }
+            Some(trimmed.to_string())
+        }
+        None => None,
+    };
+
+    if let Some(Some(parent_id)) = input.parent_id {
+        let parent = repo::find_node(&state.db, parent_id)
+            .await?
+            .filter(|item| item.space_id == space_id && item.deleted_at.is_none())
+            .ok_or_else(|| AppError::not_found("DOC_NODE_NOT_FOUND", "父节点不存在"))?;
+        if parent.kind != node::KIND_FOLDER {
+            return Err(AppError::unprocessable(
+                "DOC_VALIDATION",
+                "父节点必须是文件夹",
+                vec![FieldError::new("parentId", "必须是文件夹")],
+            ));
+        }
+        let descendants = repo::descendant_ids(&state.db, space_id, node_id).await?;
+        if descendants.contains(&parent_id) {
+            return Err(AppError::unprocessable(
+                "DOC_TREE_CYCLE",
+                "不能把节点移动到自己的子孙下",
+                vec![FieldError::new("parentId", "会形成循环")],
+            ));
+        }
+    }
+
+    let updated = repo::update_node_meta(
+        &state.db,
+        &model,
+        title.as_deref(),
+        input.parent_id,
+        input.position,
+        user_id,
+        state.now(),
+    )
+    .await?;
+    Ok(Json(NodeDto::from(&updated)))
+}
+
+/// `DELETE /spaces/{id}/nodes/{node_id}`：软删节点及整棵子树。
+pub async fn delete_node(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_editor(&state.db, space_id, user_id).await?;
+    load_node(&state, space_id, node_id).await?;
+    repo::soft_delete_subtree(&state.db, space_id, node_id, state.now()).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /spaces/{id}/nodes/{node_id}/restore`：恢复整棵子树。
+pub async fn restore_node(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<NodeDto>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_editor(&state.db, space_id, user_id).await?;
+    let model = repo::find_node(&state.db, node_id)
+        .await?
+        .filter(|item| item.space_id == space_id && item.deleted_at.is_some())
+        .ok_or_else(|| AppError::not_found("DOC_NODE_NOT_FOUND", "节点不存在或未删除"))?;
+    // 父级仍处于删除状态时不允许恢复，避免挂到已删除目录下
+    if let Some(parent_id) = model.parent_id {
+        let parent = repo::find_node(&state.db, parent_id).await?;
+        if parent.map(|item| item.deleted_at.is_some()).unwrap_or(true) {
+            return Err(AppError::unprocessable(
+                "DOC_PARENT_DELETED",
+                "父节点已删除，请先恢复父节点",
+                vec![FieldError::new("parentId", "父节点已删除")],
+            ));
+        }
+    }
+    repo::restore_subtree(&state.db, space_id, node_id, state.now()).await?;
+    let restored = repo::find_node(&state.db, node_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("DOC_NODE_NOT_FOUND", "节点不存在"))?;
+    Ok(Json(NodeDto::from(&restored)))
+}
+
 /// 更新正文请求。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -432,7 +558,14 @@ pub fn router() -> Router<SharedState> {
         .route("/spaces/{id}", axum::routing::delete(delete_space))
         .route("/spaces/{id}/tree", get(space_tree))
         .route("/spaces/{id}/nodes", post(create_node))
-        .route("/spaces/{id}/nodes/{node_id}", get(get_node))
+        .route(
+            "/spaces/{id}/nodes/{node_id}",
+            get(get_node).patch(patch_node).delete(delete_node),
+        )
+        .route(
+            "/spaces/{id}/nodes/{node_id}/restore",
+            post(restore_node),
+        )
         .route(
             "/spaces/{id}/nodes/{node_id}/content",
             axum::routing::put(update_content),
