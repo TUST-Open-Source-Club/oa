@@ -325,6 +325,46 @@ pub async fn get_node(
     })))
 }
 
+/// 搜索参数。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchQueryParams {
+    /// 关键词。
+    pub q: String,
+    /// 条数。
+    pub limit: Option<u64>,
+}
+
+/// `GET /search`：在我可读的空间里搜标题与正文。
+pub async fn search_docs(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    axum::extract::Query(query): axum::extract::Query<SearchQueryParams>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let keyword = query.q.trim();
+    if keyword.is_empty() || keyword.chars().count() > 200 {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "搜索关键词不合法",
+            vec![FieldError::new("q", "不能为空，且不超过 200 字")],
+        ));
+    }
+    let limit = query.limit.unwrap_or(20).clamp(1, 50);
+    let hits = repo::search_docs(&state.db, user_id, keyword, limit).await?;
+    Ok(Json(json!(hits
+        .iter()
+        .map(|hit| json!({
+            "id": hit.id,
+            "spaceId": hit.space_id,
+            "spaceName": hit.space_name,
+            "title": hit.title,
+            "snippet": hit.snippet,
+            "updatedAt": hit.updated_at,
+        }))
+        .collect::<Vec<_>>())))
+}
+
 /// 分享设置请求。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -786,4 +826,5 @@ pub fn router() -> Router<SharedState> {
             get(get_share).post(create_share).delete(delete_share),
         )
         .route("/public/{token}", get(public_doc))
+        .route("/search", get(search_docs))
 }

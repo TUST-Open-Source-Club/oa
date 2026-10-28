@@ -23,6 +23,14 @@ interface NodeDetail {
   contentMd: string
   visibility?: string
 }
+interface SearchHit {
+  id: string
+  spaceId: string
+  spaceName: string
+  title: string
+  snippet: string
+  updatedAt: string
+}
 interface ShareInfo {
   token: string | null
   url: string | null
@@ -66,6 +74,10 @@ const renameTarget = ref<NodeItem | null>(null)
 const moveOpen = ref(false)
 const moveTarget = ref<NodeItem | null>(null)
 const moveParent = ref('')
+
+const searchResults = ref<SearchHit[]>([])
+const searching = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 const shareOpen = ref(false)
 const shareInfo = ref<ShareInfo | null>(null)
@@ -254,6 +266,45 @@ async function deleteNode(node: NodeItem) {
   } catch (error) {
     errorMessage.value = apiErrorMessage(error)
   }
+}
+
+/** 搜索输入防抖。 */
+function onKeywordInput() {
+  clearTimeout(searchTimer)
+  const q = keyword.value.trim()
+  if (!q) {
+    searchResults.value = []
+    return
+  }
+  searchTimer = setTimeout(() => void runSearch(), 300)
+}
+
+/** 调用服务端搜索（标题 + 正文）。 */
+async function runSearch() {
+  const q = keyword.value.trim()
+  if (!q) {
+    searchResults.value = []
+    return
+  }
+  searching.value = true
+  try {
+    searchResults.value = await api<SearchHit[]>('search', { params: { q, limit: 20 } })
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  } finally {
+    searching.value = false
+  }
+}
+
+/** 打开搜索结果（必要时先切换空间）。 */
+async function openSearchHit(hit: SearchHit) {
+  if (hit.spaceId !== spaceId.value) {
+    spaceId.value = hit.spaceId
+    await loadTree()
+  }
+  await openPage({ id: hit.id, parentId: null, kind: 'page', title: hit.title, version: 0 })
+  keyword.value = ''
+  searchResults.value = []
 }
 
 /** 打开分享设置。 */
@@ -516,13 +567,39 @@ onUnmounted(() => {
           <AppIcon name="search" class="pointer-events-none absolute top-2 left-2 size-4 text-neutral-400" />
           <input
             v-model="keyword"
-            placeholder="搜索文档"
+            placeholder="搜索标题与正文"
             class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface-muted)] pr-2 pl-7 text-[12px] outline-none focus:border-primary-500 focus:bg-[var(--surface)] focus:ring-2 focus:ring-primary-500/20"
+            @input="onKeywordInput"
           />
         </div>
       </div>
 
-      <div class="flex-1 overflow-y-auto px-1.5 pb-2">
+      <div v-if="keyword.trim()" class="flex-1 overflow-y-auto px-1.5 pb-2">
+        <p v-if="searching" class="px-3 py-6 text-center text-[11px] text-neutral-400">搜索中…</p>
+        <p
+          v-else-if="searchResults.length === 0"
+          class="px-3 py-6 text-center text-[11px] text-neutral-400"
+        >
+          没有找到包含「{{ keyword.trim() }}」的文档
+        </p>
+        <button
+          v-for="hit in searchResults"
+          :key="hit.id"
+          class="mb-0.5 block w-full rounded-[var(--radius-field)] px-2 py-2 text-left transition-colors hover:bg-[var(--surface-hover)]"
+          @click="openSearchHit(hit)"
+        >
+          <span class="flex items-center justify-between gap-2 text-[11px] text-neutral-400">
+            <span class="truncate">{{ hit.spaceName }}</span>
+            <span class="shrink-0">{{ new Date(hit.updatedAt).toLocaleDateString('zh-CN') }}</span>
+          </span>
+          <span class="mt-0.5 block truncate text-[12px] font-medium text-[var(--text-strong)]">
+            {{ hit.title }}
+          </span>
+          <span class="mt-0.5 line-clamp-2 block text-[11px] text-neutral-500">{{ hit.snippet }}</span>
+        </button>
+      </div>
+
+      <div v-else class="flex-1 overflow-y-auto px-1.5 pb-2">
         <button
           v-for="row in flatTree"
           :key="row.node.id"

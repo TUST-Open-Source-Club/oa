@@ -475,3 +475,89 @@ pub async fn clear_share(
     active.updated_at = Set(now.fixed_offset());
     active.update(db).await.map_err(map_db_err)
 }
+
+/// 搜索结果行。
+#[derive(Debug, Clone)]
+pub struct SearchHit {
+    /// 节点 ID。
+    pub id: Uuid,
+    /// 空间 ID。
+    pub space_id: Uuid,
+    /// 空间名称。
+    pub space_name: String,
+    /// 标题。
+    pub title: String,
+    /// 命中上下文摘要。
+    pub snippet: String,
+    /// 更新时间。
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 生成本文摘要（命中位置前后各 40 字，压平换行）。
+fn make_snippet(content: &str, query: &str) -> String {
+    let flat = content.replace('\n', " ");
+    let lower = flat.to_lowercase();
+    let needle = query.to_lowercase();
+    let Some(byte_index) = lower.find(&needle) else {
+        return flat.chars().take(80).collect();
+    };
+    let char_index = flat[..byte_index].chars().count();
+    let start = char_index.saturating_sub(40);
+    let total = flat.chars().count();
+    let end = (char_index + needle.chars().count() + 40).min(total);
+    let snippet: String = flat.chars().skip(start).take(end - start).collect();
+    if start > 0 {
+        format!("…{snippet}")
+    } else if end < total {
+        format!("{snippet}…")
+    } else {
+        snippet
+    }
+}
+
+/// 在我可读的空间里搜索标题与正文。
+pub async fn search_docs(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    query: &str,
+    limit: u64,
+) -> Result<Vec<SearchHit>, AppError> {
+    let escaped = query
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let pattern = format!("%{escaped}%");
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT n.id, n.space_id, s.name, n.title, n.content_md, n.updated_at \
+             FROM nodes n \
+             JOIN space_members m ON m.space_id = n.space_id AND m.user_id = $1 \
+             JOIN spaces s ON s.id = n.space_id \
+             WHERE n.deleted_at IS NULL AND n.kind = 'page' \
+               AND (m.role IN ('admin', 'editor') OR n.visibility <> 'private') \
+               AND (n.title ILIKE $2 OR n.content_md ILIKE $2) \
+             ORDER BY n.updated_at DESC \
+             LIMIT $3",
+            vec![
+                sea_orm::sea_query::Value::Uuid(Some(user_id)),
+                sea_orm::sea_query::Value::String(Some(pattern)),
+                sea_orm::sea_query::Value::BigInt(Some(limit as i64)),
+            ],
+        ))
+        .await
+        .map_err(map_db_err)?;
+    let mut hits = Vec::with_capacity(rows.len());
+    for row in rows {
+        let content: String = row.try_get_by_index(4).map_err(map_db_err)?;
+        hits.push(SearchHit {
+            id: row.try_get_by_index(0).map_err(map_db_err)?,
+            space_id: row.try_get_by_index(1).map_err(map_db_err)?,
+            space_name: row.try_get_by_index(2).map_err(map_db_err)?,
+            title: row.try_get_by_index(3).map_err(map_db_err)?,
+            snippet: make_snippet(&content, query),
+            updated_at: row.try_get_by_index(5).map_err(map_db_err)?,
+        });
+    }
+    Ok(hits)
+}

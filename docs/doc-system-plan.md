@@ -6,7 +6,7 @@
 
 - [x] 目录树操作：重命名 / 移动 / 同级上移下移 / 软删（整棵子树）；面包屑已有
 - [x] 文档级可见性与分享：`private / space`，分享链接（token + 可选密码 + 有效期 + 只读）
-- [ ] 搜索：标题 + 正文 `pg_trgm`，范围 = 我可读的空间
+- [x] 搜索：标题 + 正文 `pg_trgm`，范围 = 我可读的空间
 - [ ] 导出 / 导入：Markdown、HTML；导入单篇 Markdown
 - [ ] 编辑器增强：自动保存 + 冲突提示、字数统计、图片粘贴上传、表格渲染
 
@@ -41,7 +41,7 @@ DELETE /spaces/{id}/nodes/{node_id}         软删整棵子树                  
 POST   /spaces/{id}/nodes/{node_id}/restore 恢复整棵子树                        ✅
 POST   /spaces/{id}/nodes/{node_id}/share   ✅
 GET    /public/{token}                        ✅
-GET    /search?q=
+GET    /search?q=                        ✅
 GET    /spaces/{id}/nodes/{node_id}/export?format=md|html
 POST   /spaces/{id}/import
 GET/POST /spaces/{id}/nodes/{node_id}/comments
@@ -86,3 +86,18 @@ GET    /stars
 
 测试：`services/doc/tests/share_flow.rs` 5 条。
 截图：`docs/ui-preview/docs-share-modal.png`、`docs-public-page.png`。
+
+## 已完成（P0 第 3 项 · 搜索）
+
+迁移 v4：启用 `pg_trgm`，给 `nodes(title)` 与 `nodes(content_md)` 建 GIN 索引
+（operator class 按扩展所在 schema 限定，失败用 SAVEPOINT 降级为顺序扫描）。
+
+接口：`GET /api/v1/doc/search?q=&limit=`，检索我可读空间内的页面（标题或正文），
+viewer 自动排除 `private`，已删除不出现，按更新时间倒序，返回带 40 字上下文 `snippet`；
+关键词 1~200 字（422 `DOC_VALIDATION`），`limit` 默认 20 / 上限 50。
+
+前端：文档树顶部搜索框改为服务端检索（防抖 300ms），结果展示空间名/标题/摘要，
+点击自动切换空间并打开文档。
+
+测试：`services/doc/tests/search_flow.rs` 4 条。
+截图：`docs/ui-preview/docs-search.png`。

@@ -106,7 +106,14 @@ async fn search_matches_title_and_body() {
     )
     .await;
     let budget = create_page(&app, &token, &space_id, "年度预算").await;
-    write_content(&app, &token, &space_id, &budget, "场地费用与宣传费用合计 8000 元。").await;
+    write_content(
+        &app,
+        &token,
+        &space_id,
+        &budget,
+        "场地费用与宣传费用合计 8000 元。",
+    )
+    .await;
 
     // 标题命中
     let by_title = search(&app, &token, "招新").await;
@@ -141,7 +148,9 @@ async fn search_is_scoped_to_my_spaces() {
     let their_page = create_page(&app, &other_token, &theirs, "项目计划").await;
     write_content(&app, &other_token, &theirs, &their_page, "计划内容").await;
 
-    let body = search(&app, &owner_token, "项目").await.expect(StatusCode::OK);
+    let body = search(&app, &owner_token, "项目")
+        .await
+        .expect(StatusCode::OK);
     assert_eq!(titles(&body), vec!["项目复盘"]);
 }
 
@@ -170,11 +179,15 @@ async fn search_hides_private_and_deleted_docs() {
     .expect(StatusCode::OK);
 
     // viewer 只搜到公开那篇
-    let body = search(&app, &viewer_token, "招新").await.expect(StatusCode::OK);
+    let body = search(&app, &viewer_token, "招新")
+        .await
+        .expect(StatusCode::OK);
     assert_eq!(titles(&body), vec!["公开招新说明"]);
 
     // 编辑者两篇都能搜到
-    let body = search(&app, &owner_token, "招新").await.expect(StatusCode::OK);
+    let body = search(&app, &owner_token, "招新")
+        .await
+        .expect(StatusCode::OK);
     assert_eq!(titles(&body).len(), 2);
 
     // 删除后不再出现
@@ -187,7 +200,9 @@ async fn search_hides_private_and_deleted_docs() {
     )
     .await
     .expect(StatusCode::NO_CONTENT);
-    let body = search(&app, &owner_token, "招新").await.expect(StatusCode::OK);
+    let body = search(&app, &owner_token, "招新")
+        .await
+        .expect(StatusCode::OK);
     assert_eq!(titles(&body), vec!["私密招新预算"]);
 }
 
@@ -209,7 +224,7 @@ async fn search_validates_query_and_limit() {
     let limited = request(
         &app.app,
         "GET",
-        &format!("/api/v1/doc/search?q=%E5%85%B3%E9%94%AE%E8%AF%8D&limit=2"),
+        "/api/v1/doc/search?q=%E5%85%B3%E9%94%AE%E8%AF%8D&limit=2",
         Some(&token),
         None,
     )
