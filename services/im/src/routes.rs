@@ -148,6 +148,8 @@ pub struct ConversationDto {
     pub unread: i64,
     /// 是否有未读的 @ 提及。
     pub has_mention: bool,
+    /// 近 5 秒内正在输入的用户（含自己，前端过滤）。
+    pub typing_user_ids: Vec<String>,
     /// 是否免打扰。
     pub muted: bool,
     /// 是否置顶。
@@ -187,6 +189,12 @@ pub async fn list_conversations(
             .await?,
             muted: row.member.muted,
             pinned: row.member.pinned,
+            typing_user_ids: state
+                .typing
+                .active(row.conversation.id, state.now())
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
             member_ids: members.iter().map(|m| m.user_id.to_string()).collect(),
             last_message: last.first().map(MessageDto::from),
             updated_at: row.conversation.updated_at,
@@ -276,6 +284,7 @@ pub async fn create_conversation(
         muted: member.muted,
         pinned: member.pinned,
         member_ids: members.iter().map(|m| m.user_id.to_string()).collect(),
+        typing_user_ids: Vec::new(),
         last_message: None,
         updated_at: conversation.updated_at,
     };
@@ -443,6 +452,18 @@ pub async fn send_message(
 pub struct ReadRequest {
     /// 已读到该序号（含）。
     pub seq: i64,
+}
+
+/// `POST /conversations/{id}/typing`：输入心跳（客户端 2~3 秒一次）。
+pub async fn typing_heartbeat(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(conversation_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
+    state.typing.touch(conversation_id, user_id, state.now());
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `POST /conversations/{id}/read`：上报已读位点。
@@ -1030,6 +1051,7 @@ pub fn router() -> Router<SharedState> {
             get(search_in_conversation),
         )
         .route("/search/messages", get(search_messages))
+        .route("/conversations/{id}/typing", post(typing_heartbeat))
         .route("/conversations/{id}/read", post(mark_read))
         .route(
             "/conversations/{id}/members/{user_id}/mute",

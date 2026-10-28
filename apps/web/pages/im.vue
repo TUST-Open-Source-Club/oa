@@ -47,6 +47,7 @@ interface ConversationItem {
   onlyAdminsSpeak?: boolean
   unread: number
   hasMention?: boolean
+  typingUserIds?: string[]
   memberIds: string[]
   lastMessage: MessageItem | null
   updatedAt: string
@@ -79,6 +80,14 @@ const mentionIndex = ref(0)
 const pendingMentions = ref<Record<string, string>>({})
 /** 正在引用的消息。 */
 const replyTo = ref<MessageItem | null>(null)
+/** 正在输入的成员昵称（不含自己）。 */
+const typingUsers = computed(() => {
+  const ids = active.value?.typingUserIds ?? []
+  return ids
+    .filter((id) => id !== auth.user?.id)
+    .map((id) => users.value[id]?.nickname ?? '成员')
+})
+let lastTypingAt = 0
 /** 搜索面板状态。 */
 const searchOpen = ref(false)
 const searchQuery = ref('')
@@ -172,6 +181,7 @@ async function loadConversations() {
   await resolveUsers(
     conversations.value.flatMap((item) => [
       ...item.memberIds,
+      ...(item.typingUserIds ?? []),
       ...(item.lastMessage?.senderId ? [item.lastMessage.senderId] : []),
     ]),
   )
@@ -243,8 +253,18 @@ function applyMention(id: string, name: string) {
   mentionIndex.value = 0
 }
 
+/** 输入心跳（节流 2 秒，服务端 5 秒过期）。 */
+function notifyTyping() {
+  if (!activeId.value) return
+  const now = Date.now()
+  if (now - lastTypingAt < 2000) return
+  lastTypingAt = now
+  void api(`conversations/${activeId.value}/typing`, { method: 'POST' }).catch(() => undefined)
+}
+
 /** 输入时识别 @ 片段。 */
 function onTextInput() {
+  notifyTyping()
   const value = text.value
   const at = value.lastIndexOf('@')
   const segment = at >= 0 ? value.slice(at + 1) : ''
@@ -861,7 +881,11 @@ onUnmounted(() => {
               </span>
             </span>
             <span class="mt-0.5 flex items-center justify-between gap-2">
-              <span class="truncate text-[11px] text-neutral-400">{{ previewOf(conversation) }}</span>
+              <span
+                v-if="conversation.id === activeId && typingUsers.length"
+                class="truncate text-[11px] text-primary-600 dark:text-primary-300"
+              >正在输入…</span>
+              <span v-else class="truncate text-[11px] text-neutral-400">{{ previewOf(conversation) }}</span>
               <span
                 v-if="conversation.unread > 0"
                 class="shrink-0 rounded-full bg-primary-600 px-1.5 text-[10px] leading-4 font-medium text-white"
@@ -884,7 +908,10 @@ onUnmounted(() => {
           <UserAvatar :name="titleOf(active)" :seed="active.id" size="sm" />
           <div class="min-w-0 flex-1">
             <h2 class="truncate text-[13px] font-medium text-[var(--text-strong)]">{{ titleOf(active) }}</h2>
-            <p class="text-[11px] text-neutral-400">
+            <p v-if="typingUsers.length" class="truncate text-[11px] text-primary-600 dark:text-primary-300">
+              {{ typingUsers.join('、') }} 正在输入…
+            </p>
+            <p v-else class="text-[11px] text-neutral-400">
               {{ active.type === 'group' ? `${active.memberIds.length} 位成员` : '私聊' }}
             </p>
           </div>

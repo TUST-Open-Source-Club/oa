@@ -93,6 +93,7 @@ pub mod state {
     use anyhow::Context;
     use jsonwebtoken::DecodingKey;
     use sea_orm::DatabaseConnection;
+    use uuid::Uuid;
 
     use club_auth_sdk::{decode_access_token, Claims, TokenVerifier};
     use club_bus::Bus;
@@ -112,6 +113,53 @@ pub mod state {
         pub signing_key: RwLock<Option<DecodingKey>>,
         /// 在线连接注册表。
         pub hub: crate::realtime::Hub,
+        /// 「正在输入」心跳。
+        pub typing: TypingRegistry,
+    }
+
+    /// 「正在输入」心跳有效期（秒）。
+    pub const TYPING_TTL_SECONDS: i64 = 5;
+
+    /// 内存版「正在输入」注册表（多实例部署后续接 Redis）。
+    #[derive(Default)]
+    pub struct TypingRegistry {
+        inner: std::sync::Mutex<
+            std::collections::HashMap<(Uuid, Uuid), chrono::DateTime<chrono::Utc>>,
+        >,
+    }
+
+    impl TypingRegistry {
+        /// 记录一次心跳，并顺带清理过期项。
+        pub fn touch(
+            &self,
+            conversation_id: Uuid,
+            user_id: Uuid,
+            now: chrono::DateTime<chrono::Utc>,
+        ) {
+            let mut guard = self.inner.lock().expect("typing lock");
+            guard.insert((conversation_id, user_id), now);
+            let ttl = chrono::Duration::seconds(TYPING_TTL_SECONDS);
+            guard.retain(|_, at| now.signed_duration_since(*at) < ttl);
+        }
+
+        /// 该会话在有效期内的心跳用户（按最近心跳倒序）。
+        pub fn active(
+            &self,
+            conversation_id: Uuid,
+            now: chrono::DateTime<chrono::Utc>,
+        ) -> Vec<Uuid> {
+            let ttl = chrono::Duration::seconds(TYPING_TTL_SECONDS);
+            let guard = self.inner.lock().expect("typing lock");
+            let mut rows: Vec<(Uuid, chrono::DateTime<chrono::Utc>)> = guard
+                .iter()
+                .filter(|((conversation, _), at)| {
+                    *conversation == conversation_id && now.signed_duration_since(**at) < ttl
+                })
+                .map(|((_, user), at)| (*user, *at))
+                .collect();
+            rows.sort_by_key(|(_, at)| std::cmp::Reverse(*at));
+            rows.into_iter().map(|(user, _)| user).collect()
+        }
     }
 
     impl AppState {
@@ -207,4 +255,42 @@ pub fn build_router(state: SharedState) -> Router {
         }))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+#[cfg(test)]
+mod typing_tests {
+    use super::state::{TypingRegistry, TYPING_TTL_SECONDS};
+    use chrono::{Duration, Utc};
+    use uuid::Uuid;
+
+    #[test]
+    fn typing_heartbeats_expire_and_are_scoped() {
+        let registry = TypingRegistry::default();
+        let conversation = Uuid::now_v7();
+        let alice = Uuid::now_v7();
+        let bob = Uuid::now_v7();
+        let now = Utc::now();
+
+        registry.touch(conversation, alice, now);
+        // 过期心跳在 touch 时即被清理，不会出现在后续查询里
+        registry.touch(
+            conversation,
+            bob,
+            now - Duration::seconds(TYPING_TTL_SECONDS + 1),
+        );
+        assert_eq!(registry.active(conversation, now), vec![alice]);
+        assert!(
+            registry
+                .active(
+                    conversation,
+                    now + Duration::seconds(TYPING_TTL_SECONDS + 1)
+                )
+                .is_empty(),
+            "超过 TTL 后不应再显示"
+        );
+        assert!(
+            registry.active(Uuid::now_v7(), now).is_empty(),
+            "其他会话互不影响"
+        );
+    }
 }

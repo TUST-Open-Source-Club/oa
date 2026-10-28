@@ -136,3 +136,12 @@
 - 前端：会话列表顶部搜索入口 + 防抖 300ms，结果展示会话名/正文/发送者，
   点击跳到对应会话并滚动高亮（结果不在已加载窗口时按 `beforeSeq` 补拉）；
 - 用例：`services/im/tests/search_flow.rs`（4 条）。
+
+### 7.7 正在输入（已完成）
+
+- `POST /conversations/{cid}/typing`：输入心跳（204，仅成员）；
+- 会话列表返回 `typingUserIds`（会话内近 5 秒心跳，含自己，前端过滤）；
+- 注册表在进程内存（单实例；多实例需换 Redis），`touch` 时顺带清理过期项；
+- 前端：输入框节流 2 秒上报一次，会话头部与列表预览显示「X 正在输入…」；
+- 说明：当前页面用 4s 轮询而非 WS，所以走 HTTP 心跳而非 spec 里的 WS `typing` 事件；
+- 用例：`services/im/tests/typing_flow.rs`（2 条）+ `TypingRegistry` 过期单测。

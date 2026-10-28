@@ -71,6 +71,7 @@ pub async fn spawn() -> TestApp {
         bus: None,
         signing_key: RwLock::new(Some(decoding)),
         hub: Default::default(),
+        typing: Default::default(),
     });
     let app = build_router(state.clone());
     TestApp {
