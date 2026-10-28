@@ -177,6 +177,10 @@ async fn handle_client_text(state: &SharedState, user_id: Uuid, text: &str) -> O
                 .get("clientMsgId")
                 .and_then(Value::as_str)
                 .map(str::to_string);
+            let thread_root_id = payload
+                .get("threadRootId")
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<Uuid>().ok());
             match service::create_message(
                 state,
                 user_id,
@@ -186,6 +190,7 @@ async fn handle_client_text(state: &SharedState, user_id: Uuid, text: &str) -> O
                 reply_to_id,
                 client_msg_id.clone(),
                 Vec::new(),
+                thread_root_id,
             )
             .await
             {

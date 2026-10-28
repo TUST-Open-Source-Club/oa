@@ -61,6 +61,10 @@ pub struct MessageDto {
     pub status: String,
     /// @ 提及（成员 ID 与 `"@all"`）。
     pub mentions: Vec<String>,
+    /// 线程根消息（null = 主消息流）。
+    pub thread_root_id: Option<String>,
+    /// 线程回复数（仅根消息有意义）。
+    pub thread_reply_count: i64,
     /// 编辑时间。
     pub edited_at: Option<DateTime<FixedOffset>>,
     /// 时间。
@@ -87,6 +91,8 @@ impl From<&message::Model> for MessageDto {
                         .collect()
                 })
                 .unwrap_or_default(),
+            thread_root_id: model.thread_root_id.map(|id| id.to_string()),
+            thread_reply_count: 0,
             edited_at: model.edited_at.map(|t| t.fixed_offset()),
             created_at: model.created_at,
         }
@@ -272,7 +278,18 @@ pub async fn list_messages(
     repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
     let items = repo::list_messages(&state.db, conversation_id, query.before_seq, limit).await?;
-    Ok(Json(items.iter().map(MessageDto::from).collect()))
+    let root_ids: Vec<Uuid> = items.iter().map(|item| item.id).collect();
+    let counts = repo::thread_reply_counts(&state.db, conversation_id, &root_ids).await?;
+    Ok(Json(
+        items
+            .iter()
+            .map(|item| {
+                let mut dto = MessageDto::from(item);
+                dto.thread_reply_count = counts.get(&item.id).copied().unwrap_or(0);
+                dto
+            })
+            .collect(),
+    ))
 }
 
 /// 发送消息请求。
@@ -291,6 +308,8 @@ pub struct SendMessageRequest {
     /// @ 提及：成员 ID 数组，`"@all"` 表示所有人。
     #[serde(default)]
     pub mentions: Vec<String>,
+    /// 线程根消息（在该消息的线程里回复）。
+    pub thread_root_id: Option<Uuid>,
 }
 
 /// 校验 `mentions`：成员必须在会话内；`"@all"` 仅群主/管理员、且仅群聊可用。
@@ -368,6 +387,7 @@ pub async fn send_message(
         input.reply_to_id,
         input.client_msg_id,
         mentions,
+        input.thread_root_id,
     )
     .await?;
     if created {
@@ -833,6 +853,21 @@ pub async fn message_revisions(
     Ok(Json(revisions.iter().map(RevisionDto::from).collect()))
 }
 
+/// `GET /conversations/{id}/messages/{message_id}/thread`：线程回复（按 seq 升序）。
+pub async fn list_thread(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((conversation_id, message_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Vec<MessageDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
+    repo::find_message(&state.db, conversation_id, message_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("IM_MESSAGE_NOT_FOUND", "消息不存在"))?;
+    let replies = repo::list_thread_messages(&state.db, conversation_id, message_id).await?;
+    Ok(Json(replies.iter().map(MessageDto::from).collect()))
+}
+
 /// `/api/v1/im` 路由。
 pub fn router() -> Router<SharedState> {
     Router::new()
@@ -851,6 +886,10 @@ pub fn router() -> Router<SharedState> {
         .route(
             "/conversations/{id}/messages/{message_id}/revisions",
             get(message_revisions),
+        )
+        .route(
+            "/conversations/{id}/messages/{message_id}/thread",
+            get(list_thread),
         )
         .route(
             "/conversations/{id}/messages/{message_id}/recall",

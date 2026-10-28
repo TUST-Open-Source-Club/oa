@@ -18,6 +18,8 @@ interface MessageItem {
   content: { text?: string }
   mentions?: string[]
   replyToId?: string | null
+  threadRootId?: string | null
+  threadReplyCount?: number
   status?: string
   editedAt?: string | null
   createdAt: string
@@ -70,6 +72,12 @@ const mentionIndex = ref(0)
 const pendingMentions = ref<Record<string, string>>({})
 /** 正在引用的消息。 */
 const replyTo = ref<MessageItem | null>(null)
+/** 线程面板根消息与回复。 */
+const threadRoot = ref<MessageItem | null>(null)
+const threadReplies = ref<MessageItem[]>([])
+const threadText = ref('')
+const threadLoading = ref(false)
+const threadSending = ref(false)
 
 const msgMenu = reactive<{ open: boolean; x: number; y: number; message: MessageItem | null }>({
   open: false,
@@ -168,6 +176,7 @@ async function loadMessages(scroll = true) {
 
 /** 打开会话并标记已读（上报已读到的最新 seq）。 */
 async function openConversation(id: string) {
+  closeThread()
   activeId.value = id
   await loadMessages()
   const conversation = conversations.value.find((item) => item.id === id)
@@ -477,6 +486,63 @@ function jumpToMessage(id?: string | null) {
   setTimeout(() => el.classList.remove('ring-2', 'ring-primary-500/50'), 1200)
 }
 
+/** 打开线程面板（线程回复定位到其根）。 */
+async function openThread(message: MessageItem) {
+  closeMenus()
+  const root = messageById(message.threadRootId ?? message.id)
+  if (!root) return
+  threadRoot.value = root
+  threadText.value = ''
+  await loadThread()
+}
+
+/** 关闭线程面板。 */
+function closeThread() {
+  threadRoot.value = null
+  threadReplies.value = []
+  threadText.value = ''
+}
+
+/** 拉取线程回复。 */
+async function loadThread() {
+  const root = threadRoot.value
+  if (!root) return
+  threadLoading.value = true
+  try {
+    threadReplies.value = await api<MessageItem[]>(
+      `conversations/${activeId.value}/messages/${root.id}/thread`,
+    )
+    await resolveUsers(threadReplies.value.map((row) => row.senderId ?? ''))
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  } finally {
+    threadLoading.value = false
+  }
+}
+
+/** 在线程里回复。 */
+async function sendThread() {
+  const content = threadText.value.trim()
+  const root = threadRoot.value
+  if (!content || !root || threadSending.value) return
+  threadSending.value = true
+  error.value = ''
+  try {
+    await api(`conversations/${activeId.value}/messages`, {
+      method: 'POST',
+      body: { type: 'text', content: { text: content }, threadRootId: root.id },
+    })
+    threadText.value = ''
+    await loadThread()
+    await loadMessages(false)
+    await loadConversations()
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  } finally {
+    threadSending.value = false
+  }
+}
+
 /** 打开编辑弹窗（仅自己的文本消息）。 */
 function openEdit(message: MessageItem) {
   closeMenus()
@@ -561,6 +627,7 @@ onMounted(async () => {
   pollTimer = setInterval(() => {
     void loadConversations().catch(() => undefined)
     void loadMessages(false).catch(() => undefined)
+    if (threadRoot.value) void loadThread().catch(() => undefined)
   }, 4000)
 })
 onUnmounted(() => {
@@ -714,6 +781,19 @@ onUnmounted(() => {
               <p v-if="message.status === 'recalled'" class="italic opacity-70">该消息已撤回</p>
               <p v-else class="break-words whitespace-pre-wrap">{{ message.content?.text }}</p>
               <button
+                v-if="!message.threadRootId && (message.threadReplyCount ?? 0) > 0"
+                type="button"
+                class="mt-1 block rounded px-1 text-[10px] font-medium"
+                :class="
+                  message.senderId === auth.user?.id
+                    ? 'bg-white/15 text-white hover:bg-white/25'
+                    : 'bg-primary-500/10 text-primary-700 hover:bg-primary-500/20 dark:text-primary-200'
+                "
+                @click.stop="openThread(message)"
+              >
+                {{ message.threadReplyCount }} 条回复
+              </button>
+              <button
                 v-if="message.editedAt"
                 type="button"
                 class="mt-0.5 block text-[10px] not-italic opacity-70 underline-offset-2 hover:underline"
@@ -789,6 +869,75 @@ onUnmounted(() => {
       </div>
     </section>
 
+    <!-- 线程面板 -->
+    <aside
+      v-if="threadRoot"
+      class="flex w-72 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface-muted)]/40"
+    >
+      <header class="flex h-11 items-center gap-2 border-b border-[var(--border)] px-3">
+        <AppIcon name="chat" class="size-4 text-neutral-400" />
+        <h2 class="flex-1 text-[13px] font-medium text-[var(--text-strong)]">线程</h2>
+        <span class="text-[11px] text-neutral-400">{{ threadReplies.length }}</span>
+        <button
+          type="button"
+          class="rounded-[var(--radius-field)] p-1 text-neutral-400 hover:bg-[var(--surface-hover)] hover:text-neutral-600"
+          title="关闭线程"
+          aria-label="关闭线程"
+          @click="closeThread"
+        >
+          <AppIcon name="close" class="size-3.5" />
+        </button>
+      </header>
+
+      <div class="flex-1 space-y-3 overflow-y-auto px-3 py-3">
+        <div class="rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] p-2.5">
+          <p class="mb-1 text-[10px] text-neutral-400">
+            {{ users[threadRoot.senderId ?? '']?.nickname ?? '系统' }}
+            · {{ timeOf(threadRoot.createdAt) }}
+          </p>
+          <p class="break-words whitespace-pre-wrap text-[12px] text-[var(--text-strong)]">
+            {{ quoteText(threadRoot) }}
+          </p>
+        </div>
+
+        <p v-if="threadLoading" class="py-4 text-center text-[11px] text-neutral-400">加载中…</p>
+        <p
+          v-else-if="threadReplies.length === 0"
+          class="py-4 text-center text-[11px] text-neutral-400"
+        >
+          还没有回复，开始第一条
+        </p>
+        <div v-for="reply in threadReplies" :key="reply.id" class="flex items-start gap-2">
+          <UserAvatar
+            :name="users[reply.senderId ?? '']?.nickname ?? '成员'"
+            :seed="reply.senderId ?? 'system'"
+            size="sm"
+          />
+          <div class="min-w-0 flex-1">
+            <p class="text-[10px] text-neutral-400">
+              {{ users[reply.senderId ?? '']?.nickname ?? '成员' }} · {{ timeOf(reply.createdAt) }}
+            </p>
+            <p class="break-words whitespace-pre-wrap text-[12px] text-[var(--text-strong)]">
+              {{ reply.content?.text }}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <footer class="flex items-end gap-1.5 border-t border-[var(--border)] p-2">
+        <textarea
+          v-model="threadText"
+          rows="2"
+          placeholder="回复线程，Enter 发送"
+          class="min-w-0 flex-1 resize-none rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-1.5 text-[12px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+          @keydown.enter.exact.prevent="sendThread"
+        />
+        <Button :disabled="!threadText.trim() || threadSending" @click="sendThread">
+          <AppIcon name="send" class="size-4" />
+        </Button>
+      </footer>
+    </aside>
+
     <!-- 会话右键菜单 -->
     <div
       v-if="convMenu.open && convMenu.conversation"
@@ -817,6 +966,13 @@ onUnmounted(() => {
         @click="startReply(msgMenu.message!)"
       >
         回复
+      </button>
+      <button
+        v-if="msgMenu.message.status !== 'recalled'"
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+        @click="openThread(msgMenu.message!)"
+      >
+        线程
       </button>
       <button class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]" @click="copyMessage(msgMenu.message!)">
         复制文本

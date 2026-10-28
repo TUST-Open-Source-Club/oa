@@ -94,13 +94,26 @@ async fn thread_replies_are_hidden_from_main_history_and_counted() {
     assert_eq!(root["threadReplyCount"], 0);
     assert!(root["threadRootId"].is_null());
 
-    let first = send(&app, &member_token, &conversation_id, "第一条回复", Some(&root_id)).await;
+    let first = send(
+        &app,
+        &member_token,
+        &conversation_id,
+        "第一条回复",
+        Some(&root_id),
+    )
+    .await;
     let first = first.expect(StatusCode::CREATED);
     assert_eq!(first["threadRootId"], root_id);
 
-    send(&app, &owner_token, &conversation_id, "第二条回复", Some(&root_id))
-        .await
-        .expect(StatusCode::CREATED);
+    send(
+        &app,
+        &owner_token,
+        &conversation_id,
+        "第二条回复",
+        Some(&root_id),
+    )
+    .await
+    .expect(StatusCode::CREATED);
 
     // 主消息流只有根消息，且计数为 2
     let list = history(&app, &member_token, &conversation_id).await;
@@ -137,7 +150,14 @@ async fn thread_root_must_belong_to_conversation() {
         .expect(StatusCode::CREATED);
     let foreign_id = foreign["id"].as_str().unwrap().to_string();
 
-    let denied = send(&app, &member_token, &conversation_id, "跨会话线程", Some(&foreign_id)).await;
+    let denied = send(
+        &app,
+        &member_token,
+        &conversation_id,
+        "跨会话线程",
+        Some(&foreign_id),
+    )
+    .await;
     let body = denied.expect(StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["code"], "IM_VALIDATION");
 
@@ -167,15 +187,9 @@ async fn nested_threads_are_rejected() {
         .as_str()
         .unwrap()
         .to_string();
-    let reply_id = send(
-        &app,
-        &owner_token,
-        &conversation_id,
-        "回复",
-        Some(&root_id),
-    )
-    .await
-    .expect(StatusCode::CREATED)["id"]
+    let reply_id = send(&app, &owner_token, &conversation_id, "回复", Some(&root_id))
+        .await
+        .expect(StatusCode::CREATED)["id"]
         .as_str()
         .unwrap()
         .to_string();

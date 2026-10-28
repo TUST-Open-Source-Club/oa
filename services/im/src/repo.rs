@@ -318,6 +318,8 @@ pub struct NewMessage {
     pub client_msg_id: Option<String>,
     /// @ 提及（成员 ID 与 `"@all"`）。
     pub mentions: Vec<String>,
+    /// 线程根消息（None = 主消息流）。
+    pub thread_root_id: Option<Uuid>,
 }
 
 /// 插入消息（clientMsgId 幂等：重复发送返回既有消息与 `false`）。
@@ -349,6 +351,7 @@ pub async fn insert_message(
         reply_to_id: Set(new.reply_to_id),
         client_msg_id: Set(new.client_msg_id),
         mentions: Set(serde_json::json!(new.mentions)),
+        thread_root_id: Set(new.thread_root_id),
         edited_at: Set(None),
         status: Set("normal".to_string()),
         recalled_at: Set(None),
@@ -390,8 +393,10 @@ pub async fn list_messages(
     before_seq: Option<i64>,
     limit: u64,
 ) -> Result<Vec<message::Model>, AppError> {
+    // 主消息流不包含线程回复（线程回复通过 list_thread_messages 拉取）
     let mut select = message::Entity::find()
         .filter(message::Column::ConversationId.eq(conversation_id))
+        .filter(message::Column::ThreadRootId.is_null())
         .order_by_desc(message::Column::Seq)
         .limit(limit);
     if let Some(before_seq) = before_seq {
@@ -658,4 +663,44 @@ pub async fn edit_message_content(
     let updated = active.update(&txn).await.map_err(map_db_err)?;
     txn.commit().await.map_err(map_db_err)?;
     Ok(updated)
+}
+
+/// 列出某线程根下的全部回复（按 seq 升序）。
+pub async fn list_thread_messages(
+    db: &DatabaseConnection,
+    conversation_id: Uuid,
+    root_id: Uuid,
+) -> Result<Vec<message::Model>, AppError> {
+    message::Entity::find()
+        .filter(message::Column::ConversationId.eq(conversation_id))
+        .filter(message::Column::ThreadRootId.eq(root_id))
+        .order_by_asc(message::Column::Seq)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 统计一组根消息的线程回复数（根 ID → 条数；无回复的根不在结果中）。
+pub async fn thread_reply_counts(
+    db: &DatabaseConnection,
+    conversation_id: Uuid,
+    root_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, i64>, AppError> {
+    if root_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let rows: Vec<Option<Uuid>> = message::Entity::find()
+        .select_only()
+        .column(message::Column::ThreadRootId)
+        .filter(message::Column::ConversationId.eq(conversation_id))
+        .filter(message::Column::ThreadRootId.is_in(root_ids.to_vec()))
+        .into_tuple::<Option<Uuid>>()
+        .all(db)
+        .await
+        .map_err(map_db_err)?;
+    let mut counts: std::collections::HashMap<Uuid, i64> = std::collections::HashMap::new();
+    for root in rows.into_iter().flatten() {
+        *counts.entry(root).or_insert(0) += 1;
+    }
+    Ok(counts)
 }

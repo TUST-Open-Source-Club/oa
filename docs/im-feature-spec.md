@@ -100,3 +100,12 @@
 - 原消息已撤回时显示「该消息已撤回」，未加载到窗口内显示「原消息不可用」；
 - 服务端已有校验（引用不存在的消息、跨会话引用 → 422 `IM_VALIDATION`），
   本步补回归用例：`services/im/tests/reply_flow.rs`（落库回读、跨会话拒绝）。
+
+### 7.3 线程（已完成）
+
+- `messages.thread_root_id`（迁移 v5，部分索引 `WHERE thread_root_id IS NOT NULL`）；
+- 发送时带 `threadRootId`：根须在同一会话（422 `IM_VALIDATION`），且根不能是线程回复（400 `IM_THREAD_NESTED`）；
+- `GET /conversations/{cid}/messages` 只返回主消息流，根消息带 `threadReplyCount`；
+- `GET /conversations/{cid}/messages/{mid}/thread` 返回该根的全部回复（按 `seq` 升序，仅成员可读）；
+- 前端：根消息显示「N 条回复」，右侧线程面板展示根预览 + 回复列表 + 回复输入框，会话列表展示回复数；
+- 用例：`services/im/tests/thread_flow.rs`（4 条：隐藏与计数、跨会话/不存在根、嵌套拒绝、成员权限）。

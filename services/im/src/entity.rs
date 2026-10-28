@@ -135,6 +135,9 @@ pub mod message {
         /// @ 提及（用户 ID 数组，含 `"@all"` 标记）。
         #[sea_orm(column_type = "JsonBinary")]
         pub mentions: Json,
+        /// 线程根消息 ID（NULL 表示主消息流）。
+        #[sea_orm(nullable)]
+        pub thread_root_id: Option<Uuid>,
         /// 编辑时间（P1 编辑历史用）。
         #[sea_orm(nullable)]
         pub edited_at: Option<DateTimeWithTimeZone>,

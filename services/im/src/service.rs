@@ -26,6 +26,7 @@ pub async fn create_message(
     reply_to_id: Option<Uuid>,
     client_msg_id: Option<String>,
     mentions: Vec<String>,
+    thread_root_id: Option<Uuid>,
 ) -> Result<(message::Model, bool), AppError> {
     domain::validate_message(kind, content)?;
     let ctx = repo::get_conversation_for_member(&state.db, conversation_id, sender_id).await?;
@@ -42,6 +43,25 @@ pub async fn create_message(
         }
     }
 
+    // 线程根必须是同会话的主消息流消息（不再嵌套线程）
+    if let Some(root_id) = thread_root_id {
+        let root = repo::find_message(&state.db, conversation_id, root_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::unprocessable(
+                    "IM_VALIDATION",
+                    "线程根消息不存在",
+                    vec![FieldError::new("threadRootId", "消息不存在")],
+                )
+            })?;
+        if root.thread_root_id.is_some() {
+            return Err(AppError::bad_request(
+                "IM_THREAD_NESTED",
+                "线程内不能再开线程",
+            ));
+        }
+    }
+
     let now = state.now();
     let (model, created) = repo::insert_message(
         &state.db,
@@ -53,6 +73,7 @@ pub async fn create_message(
             reply_to_id,
             client_msg_id,
             mentions,
+            thread_root_id,
         },
         now,
     )
