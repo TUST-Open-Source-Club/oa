@@ -355,146 +355,167 @@ onMounted(loadProjects)
 </script>
 
 <template>
-  <div class="space-y-5">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h1 class="text-xl font-semibold">任务</h1>
-        <p class="mt-0.5 text-sm text-neutral-400">拖拽卡片流转；点击卡片上的按钮编辑、指派与流转状态</p>
-      </div>
+  <div class="mx-auto w-full max-w-[1280px]">
+    <!-- 页头：项目切换 + 操作 -->
+    <header class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex flex-wrap items-center gap-2">
         <select
           v-model="projectId"
-          class="rounded-[var(--radius-field)] border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-primary-500 dark:border-neutral-700 dark:bg-neutral-900"
+          class="h-8 rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 text-[13px] font-medium text-[var(--text-strong)] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
           @change="loadBoard"
         >
           <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.name }}</option>
         </select>
-        <Input v-model="newProjectName" placeholder="新项目名称" class="max-w-40" />
+        <span v-if="columns.length" class="text-[11px] text-neutral-400">
+          {{ tasks.length }} 个任务 · {{ columns.length }} 列
+        </span>
+      </div>
+      <div class="flex flex-wrap items-center gap-1.5">
+        <Input v-model="newProjectName" placeholder="新项目名称" class="w-36" />
         <Button variant="secondary" size="sm" @click="createProject">新建项目</Button>
-        <Button v-if="projectId" variant="secondary" size="sm" @click="openMembers">成员</Button>
-        <Button v-if="projectId" variant="secondary" size="sm" @click="openProjectSettings">项目设置</Button>
+        <Button v-if="projectId" variant="ghost" size="sm" @click="openMembers">成员</Button>
+        <Button v-if="projectId" variant="ghost" size="sm" @click="openProjectSettings">项目设置</Button>
         <Button v-if="projectId" size="sm" @click="openCreate()">
-          <AppIcon name="plus" class="size-4" /> 新建任务
+          <AppIcon name="plus" class="size-3.5" /> 新建任务
         </Button>
       </div>
-    </div>
+    </header>
 
-    <p v-if="message" role="alert" class="text-sm text-danger-500">{{ message }}</p>
+    <p
+      v-if="message"
+      role="alert"
+      class="mt-3 rounded-[var(--radius-field)] border border-danger-500/30 bg-danger-50 px-3 py-2 text-[12px] text-danger-700 dark:bg-danger-500/10"
+    >
+      {{ message }}
+    </p>
 
-    <div v-if="columns.length" class="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <!-- 看板：固定宽度列 + 横向滚动 -->
+    <div v-if="columns.length" class="mt-4 flex items-start gap-3 overflow-x-auto pb-2">
       <section
         v-for="column in columns"
         :key="column.id"
-        class="rounded-[var(--radius-card)] border bg-neutral-100/60 p-3 transition dark:bg-neutral-900/60"
-        :class="dropTarget === column.id ? 'border-primary-400 bg-primary-50/60 dark:bg-primary-900/20' : 'border-neutral-200 dark:border-neutral-800'"
+        class="flex w-[300px] shrink-0 flex-col rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface-muted)] p-2 transition-colors"
+        :class="dropTarget === column.id ? 'border-primary-400 bg-primary-50/60 dark:bg-primary-900/20' : ''"
         @dragover.prevent="dropTarget = column.id"
         @dragleave="dropTarget === column.id && (dropTarget = '')"
         @drop="onDrop(column.id)"
       >
-        <div class="mb-2 flex items-center justify-between px-1">
-          <h2 class="flex items-center gap-2 text-sm font-semibold">
-            {{ column.name }}
-            <span class="rounded-full bg-neutral-200 px-1.5 text-[10px] leading-4 text-neutral-500 dark:bg-neutral-800">
+        <div class="mb-1.5 flex items-center justify-between px-1.5 pt-0.5">
+          <div class="flex items-center gap-1.5">
+            <span class="text-[12px] font-medium text-[var(--text-strong)]">{{ column.name }}</span>
+            <span
+              class="rounded bg-[var(--surface)] px-1.5 text-[10px] leading-4 text-neutral-400 ring-1 ring-[var(--border)]"
+            >
               {{ tasksOf(column.id).length }}
             </span>
-          </h2>
+          </div>
           <button
-            class="rounded p-1 text-neutral-400 transition hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-800"
+            class="rounded-[var(--radius-field)] p-1 text-neutral-400 transition hover:bg-[var(--surface-hover)] hover:text-neutral-600"
             aria-label="添加任务"
             @click="openCreate(column.id)"
           >
-            <AppIcon name="plus" class="size-4" />
+            <AppIcon name="plus" class="size-3.5" />
           </button>
         </div>
-        <div class="space-y-2">
+
+        <div class="space-y-1.5">
           <article
             v-for="task in tasksOf(column.id)"
             :key="task.id"
             draggable="true"
-            class="group cursor-grab rounded-[var(--radius-field)] border border-neutral-200 bg-white p-3 shadow-sm transition hover:shadow-md active:cursor-grabbing dark:border-neutral-800 dark:bg-neutral-900"
+            class="group cursor-grab rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] p-2.5 shadow-[var(--shadow-card)] transition hover:border-[var(--border-strong)] active:cursor-grabbing"
             :class="[draggingId === task.id ? 'opacity-50' : '', task.status === 'terminated' ? 'opacity-60' : '']"
             @dragstart="draggingId = task.id"
             @dragend="draggingId = ''"
           >
-            <div class="flex items-start gap-2">
-              <span class="mt-1.5 size-2 shrink-0 rounded-full" :class="priorityOf(task.priority).dot" />
-              <div class="min-w-0 flex-1">
-                <div class="flex items-start justify-between gap-2">
-                  <p class="text-sm leading-5" :class="task.status !== 'active' ? 'text-neutral-400 line-through' : ''">
-                    {{ task.title }}
-                  </p>
-                  <span
-                    v-if="statusOf(task)"
-                    class="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] leading-4"
-                    :class="statusOf(task)?.class"
-                  >
-                    {{ statusOf(task)?.label }}
-                  </span>
-                </div>
-                <p v-if="task.descriptionMd" class="mt-1 line-clamp-2 text-xs text-neutral-400">{{ task.descriptionMd }}</p>
-                <div class="mt-2 flex flex-wrap items-center gap-2">
-                  <div v-if="(task.assigneeIds ?? []).length" class="flex -space-x-1.5">
-                    <span
-                      v-for="id in task.assigneeIds.slice(0, 3)"
-                      :key="id"
-                      :title="users[id]?.nickname ?? id"
-                    >
-                      <UserAvatar :name="users[id]?.nickname" :seed="id" size="sm" class="ring-2 ring-white dark:ring-neutral-900" />
-                    </span>
-                    <span
-                      v-if="task.assigneeIds.length > 3"
-                      class="flex size-6 items-center justify-center rounded-full bg-neutral-200 text-[10px] text-neutral-600 ring-2 ring-white dark:bg-neutral-700 dark:text-neutral-200 dark:ring-neutral-900"
-                    >
-                      +{{ task.assigneeIds.length - 3 }}
-                    </span>
-                  </div>
-                  <button
-                    v-else
-                    class="inline-flex items-center gap-1 rounded-full border border-dashed border-neutral-300 px-1.5 py-0.5 text-xs text-neutral-400 transition hover:border-primary-400 hover:text-primary-600"
-                    @click="claimTask(task)"
-                  >
-                    <AppIcon name="users" class="size-3.5" /> 认领
-                  </button>
-                  <span v-if="task.startAt || task.dueAt" class="text-[11px] text-neutral-400">
-                    {{ task.startAt ? new Date(task.startAt).toLocaleDateString('zh-CN') : '' }}
-                    <template v-if="task.dueAt">→ {{ new Date(task.dueAt).toLocaleDateString('zh-CN') }}</template>
-                  </span>
-                </div>
-                <div class="mt-2 flex flex-wrap gap-1 opacity-0 transition group-hover:opacity-100">
-                  <button class="rounded px-1.5 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800" @click="openEdit(task)">
-                    编辑
-                  </button>
-                  <button
-                    v-if="task.status === 'active'"
-                    class="rounded px-1.5 py-0.5 text-xs text-success-700 hover:bg-success-50 dark:hover:bg-success-500/10"
-                    @click="setStatus(task, 'done')"
-                  >
-                    完成
-                  </button>
-                  <button
-                    v-if="task.status === 'active'"
-                    class="rounded px-1.5 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                    @click="setStatus(task, 'terminated')"
-                  >
-                    终止
-                  </button>
-                  <button
-                    v-if="task.status !== 'active'"
-                    class="rounded px-1.5 py-0.5 text-xs text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/30"
-                    @click="setStatus(task, 'active')"
-                  >
-                    重开
-                  </button>
-                  <button class="rounded px-1.5 py-0.5 text-xs text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-500/10" @click="removeTask(task)">
-                    删除
-                  </button>
-                </div>
+            <div class="flex items-start gap-1.5">
+              <span class="mt-[5px] size-1.5 shrink-0 rounded-full" :class="priorityOf(task.priority).dot" />
+              <p
+                class="min-w-0 flex-1 text-[13px] leading-5"
+                :class="task.status !== 'active' ? 'text-neutral-400 line-through' : 'text-[var(--text-strong)]'"
+              >
+                {{ task.title }}
+              </p>
+              <span
+                v-if="statusOf(task)"
+                class="shrink-0 rounded px-1.5 text-[10px] leading-4"
+                :class="statusOf(task)?.class"
+              >
+                {{ statusOf(task)?.label }}
+              </span>
+            </div>
+
+            <p v-if="task.descriptionMd" class="mt-1 line-clamp-2 pl-3 text-[12px] leading-relaxed text-neutral-400">
+              {{ task.descriptionMd }}
+            </p>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2 pl-3">
+              <div v-if="(task.assigneeIds ?? []).length" class="flex -space-x-1.5">
+                <span v-for="id in task.assigneeIds.slice(0, 3)" :key="id" :title="users[id]?.nickname ?? id">
+                  <UserAvatar
+                    :name="users[id]?.nickname"
+                    :seed="id"
+                    size="sm"
+                    class="ring-2 ring-[var(--surface)]"
+                  />
+                </span>
+                <span
+                  v-if="task.assigneeIds.length > 3"
+                  class="flex size-6 items-center justify-center rounded-full bg-[var(--surface-muted)] text-[10px] text-neutral-500 ring-2 ring-[var(--surface)]"
+                >
+                  +{{ task.assigneeIds.length - 3 }}
+                </span>
               </div>
+              <button
+                v-else
+                class="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--border-strong)] px-1.5 text-[11px] text-neutral-400 transition hover:border-primary-400 hover:text-primary-600"
+                @click="claimTask(task)"
+              >
+                <AppIcon name="users" class="size-3" /> 认领
+              </button>
+              <span v-if="task.startAt || task.dueAt" class="text-[11px] text-neutral-400">
+                {{ task.startAt ? new Date(task.startAt).toLocaleDateString('zh-CN') : '' }}
+                <template v-if="task.dueAt">→ {{ new Date(task.dueAt).toLocaleDateString('zh-CN') }}</template>
+              </span>
+            </div>
+
+            <div class="mt-1.5 flex flex-wrap gap-0.5 pl-3 opacity-0 transition group-hover:opacity-100">
+              <button class="rounded px-1.5 py-0.5 text-[11px] text-neutral-500 hover:bg-[var(--surface-hover)]" @click="openEdit(task)">
+                编辑
+              </button>
+              <button
+                v-if="task.status === 'active'"
+                class="rounded px-1.5 py-0.5 text-[11px] text-success-700 hover:bg-success-50 dark:hover:bg-success-500/10"
+                @click="setStatus(task, 'done')"
+              >
+                完成
+              </button>
+              <button
+                v-if="task.status === 'active'"
+                class="rounded px-1.5 py-0.5 text-[11px] text-neutral-500 hover:bg-[var(--surface-hover)]"
+                @click="setStatus(task, 'terminated')"
+              >
+                终止
+              </button>
+              <button
+                v-if="task.status !== 'active'"
+                class="rounded px-1.5 py-0.5 text-[11px] text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/30"
+                @click="setStatus(task, 'active')"
+              >
+                重开
+              </button>
+              <button
+                class="rounded px-1.5 py-0.5 text-[11px] text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-500/10"
+                @click="removeTask(task)"
+              >
+                删除
+              </button>
             </div>
           </article>
+
           <p
             v-if="tasksOf(column.id).length === 0"
-            class="rounded-[var(--radius-field)] border border-dashed border-neutral-300 py-6 text-center text-xs text-neutral-400 dark:border-neutral-700"
+            class="rounded-[var(--radius-card)] border border-dashed border-[var(--border-strong)] py-5 text-center text-[11px] text-neutral-400"
           >
             拖拽任务到这里
           </p>
@@ -504,49 +525,57 @@ onMounted(loadProjects)
 
     <div
       v-else
-      class="rounded-[var(--radius-card)] border border-dashed border-neutral-300 py-16 text-center text-sm text-neutral-400 dark:border-neutral-700"
+      class="mt-4 rounded-[var(--radius-card)] border border-dashed border-[var(--border-strong)] px-6 py-16 text-center"
     >
-      创建或选择一个项目开始使用看板
+      <p class="text-[13px] text-neutral-500">创建或选择一个项目开始使用看板</p>
+      <p class="mt-1 text-[12px] text-neutral-400">项目内按列组织任务，拖拽卡片即可流转状态</p>
     </div>
 
     <!-- 新建 / 编辑任务 -->
     <AppModal :open="taskOpen" :title="editingId ? '编辑任务' : '新建任务'" @close="taskOpen = false">
-      <div class="space-y-4">
-        <label class="block text-sm">
-          <span class="mb-1 block text-xs text-neutral-500">标题</span>
+      <div class="space-y-3">
+        <label class="block">
+          <span class="mb-1 block text-[11px] font-medium text-neutral-500">标题</span>
           <Input v-model="draft.title" placeholder="要做什么？" />
         </label>
-        <label class="block text-sm">
-          <span class="mb-1 block text-xs text-neutral-500">内容</span>
+        <label class="block">
+          <span class="mb-1 block text-[11px] font-medium text-neutral-500">内容</span>
           <textarea
             v-model="draft.descriptionMd"
             rows="4"
             placeholder="补充说明、验收标准…（支持 Markdown）"
-            class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-primary-500 dark:border-neutral-700"
+            class="w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-2 text-[13px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
           />
         </label>
         <div class="grid grid-cols-2 gap-3">
-          <label class="block text-sm">
-            <span class="mb-1 block text-xs text-neutral-500">所在列</span>
-            <select v-model="draft.columnId" class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700">
+          <label class="block">
+            <span class="mb-1 block text-[11px] font-medium text-neutral-500">所在列</span>
+            <select
+              v-model="draft.columnId"
+              class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 text-[13px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+            >
               <option v-for="column in columns" :key="column.id" :value="column.id">{{ column.name }}</option>
             </select>
           </label>
-          <label class="block text-sm">
-            <span class="mb-1 block text-xs text-neutral-500">优先级</span>
-            <select v-model="draft.priority" class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700">
+          <label class="block">
+            <span class="mb-1 block text-[11px] font-medium text-neutral-500">优先级</span>
+            <select
+              v-model="draft.priority"
+              class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 text-[13px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+            >
               <option v-for="item in priorities" :key="item.value" :value="item.value">{{ item.label }}</option>
             </select>
           </label>
         </div>
         <div>
-          <span class="mb-1 block text-xs text-neutral-500">负责人（可多选）</span>
+          <span class="mb-1 block text-[11px] font-medium text-neutral-500">负责人（可多选）</span>
           <UserPicker v-model="draft.assigneeIds" multiple placeholder="搜索并选择负责人（可留空）" />
         </div>
-        <div v-if="editingId">
-          <div class="mb-1 flex items-center justify-between">
-            <span class="text-xs text-neutral-500">附件（{{ attachments.length }}）</span>
-            <label class="cursor-pointer text-xs text-primary-600 hover:underline">
+
+        <div v-if="editingId" class="rounded-[var(--radius-field)] border border-[var(--border)] p-3">
+          <div class="mb-1.5 flex items-center justify-between">
+            <span class="text-[11px] font-medium text-neutral-500">附件（{{ attachments.length }}）</span>
+            <label class="cursor-pointer text-[11px] font-medium text-primary-600 hover:text-primary-700">
               {{ uploadingAttachment ? '上传中…' : '上传附件' }}
               <input type="file" class="hidden" :disabled="uploadingAttachment" @change="onUploadAttachment" />
             </label>
@@ -555,40 +584,50 @@ onMounted(loadProjects)
             <li
               v-for="attachment in attachments"
               :key="attachment.id"
-              class="flex items-center justify-between rounded-[var(--radius-field)] border border-neutral-200 px-2.5 py-1.5 text-sm dark:border-neutral-700"
+              class="flex items-center gap-2 rounded-[var(--radius-field)] bg-[var(--surface-muted)] px-2 py-1 text-[12px]"
             >
               <span class="min-w-0 flex-1 truncate">{{ attachment.name }}</span>
-              <span class="mx-2 shrink-0 text-xs text-neutral-400">{{ formatSize(attachment.size) }}</span>
-              <button class="shrink-0 text-xs text-primary-600 hover:underline" @click="downloadAttachment(attachment)">下载</button>
-              <button class="shrink-0 pl-2 text-xs text-danger-500 hover:underline" @click="removeAttachment(attachment)">删除</button>
+              <span class="shrink-0 text-[11px] text-neutral-400">{{ formatSize(attachment.size) }}</span>
+              <button class="shrink-0 text-[11px] text-primary-600 hover:underline" @click="downloadAttachment(attachment)">下载</button>
+              <button class="shrink-0 text-[11px] text-danger-500 hover:underline" @click="removeAttachment(attachment)">删除</button>
             </li>
           </ul>
-          <p v-else class="text-xs text-neutral-300">暂无附件（任意类型，单文件 ≤ 50MB）</p>
+          <p v-else class="text-[11px] text-neutral-400">暂无附件（任意类型，单文件 ≤ 50MB）</p>
         </div>
-        <div v-if="editingId">
-          <span class="mb-1 block text-xs text-neutral-500">操作记录（{{ changes.length }}）</span>
+
+        <div v-if="editingId" class="rounded-[var(--radius-field)] border border-[var(--border)] p-3">
+          <p class="mb-1.5 text-[11px] font-medium text-neutral-500">操作记录（{{ changes.length }}）</p>
           <ul v-if="changes.length" class="space-y-1">
             <li
               v-for="change in changes"
               :key="change.id"
-              class="flex items-center justify-between rounded-[var(--radius-field)] border border-neutral-200 px-2.5 py-1.5 text-xs dark:border-neutral-700"
+              class="flex items-center justify-between gap-2 text-[11px] text-neutral-500"
             >
-              <span class="text-neutral-500">
+              <span class="truncate">
                 {{ actionLabel(change.action) }} · {{ new Date(change.createdAt).toLocaleString('zh-CN') }}
               </span>
-              <button class="text-primary-600 hover:underline" @click="undoChange(change)">撤销</button>
+              <button class="shrink-0 text-primary-600 hover:underline" @click="undoChange(change)">撤销</button>
             </li>
           </ul>
-          <p v-else class="text-xs text-neutral-300">暂无操作记录</p>
+          <p v-else class="text-[11px] text-neutral-400">暂无操作记录</p>
         </div>
+
         <div class="grid grid-cols-2 gap-3">
-          <label class="block text-sm">
-            <span class="mb-1 block text-xs text-neutral-500">开始时间</span>
-            <input v-model="draft.startAt" type="datetime-local" class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700" />
+          <label class="block">
+            <span class="mb-1 block text-[11px] font-medium text-neutral-500">开始时间</span>
+            <input
+              v-model="draft.startAt"
+              type="datetime-local"
+              class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 text-[13px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+            />
           </label>
-          <label class="block text-sm">
-            <span class="mb-1 block text-xs text-neutral-500">截止时间</span>
-            <input v-model="draft.dueAt" type="datetime-local" class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700" />
+          <label class="block">
+            <span class="mb-1 block text-[11px] font-medium text-neutral-500">截止时间</span>
+            <input
+              v-model="draft.dueAt"
+              type="datetime-local"
+              class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 text-[13px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+            />
           </label>
         </div>
       </div>
@@ -601,12 +640,12 @@ onMounted(loadProjects)
     <!-- 项目设置 -->
     <AppModal :open="projectOpen" title="项目设置" @close="projectOpen = false">
       <div class="space-y-3">
-        <label class="block text-sm">
-          <span class="mb-1 block text-xs text-neutral-500">项目名称</span>
+        <label class="block">
+          <span class="mb-1 block text-[11px] font-medium text-neutral-500">项目名称</span>
           <Input v-model="projectNameDraft" @keyup.enter="saveProject" />
         </label>
-        <div class="rounded-[var(--radius-field)] border border-danger-200 p-3 dark:border-danger-500/30">
-          <p class="text-xs text-neutral-500">删除项目会连同其看板列、任务、附件一并删除，且不可恢复。</p>
+        <div class="rounded-[var(--radius-field)] border border-danger-500/30 p-3">
+          <p class="text-[12px] text-neutral-500">删除项目会连同其看板列、任务、附件一并删除，且不可恢复。</p>
           <Button variant="danger" size="sm" class="mt-2" @click="deleteProject">删除项目</Button>
         </div>
       </div>
@@ -618,7 +657,7 @@ onMounted(loadProjects)
 
     <!-- 项目成员 -->
     <AppModal :open="membersOpen" title="项目成员" @close="membersOpen = false">
-      <p class="mb-3 text-xs text-neutral-400">添加成员后，他们才能进入该项目并认领任务。</p>
+      <p class="mb-3 text-[12px] text-neutral-500">添加成员后，他们才能进入该项目并认领任务。</p>
       <UserPicker v-model="memberIds" multiple :exclude-ids="[auth.user?.id ?? '']" placeholder="搜索并添加成员" />
       <template #footer>
         <Button variant="secondary" @click="membersOpen = false">关闭</Button>
