@@ -1,55 +1,90 @@
 /*
  * 设计 token（Tailwind v4 @theme 语法）。
- * Web 门户与 Tauri 客户端共用：颜色、圆角、字体、阴影。
+ *
+ * 风格：现代克制（类 Linear）——冷灰阶为主、单一靛蓝强调色、细边框、极浅阴影、
+ * 6/8px 小圆角；层级主要靠边框与表面色差表达，而非大阴影。
+ * Web 门户与客户端壳共用：颜色、圆角、字体、阴影。
  * 使用方：@import "tailwindcss"; @import "@club-oa/ui/theme.css";
  */
 @theme {
-  /* 品牌色（靛蓝） */
-  --color-primary-50: #eef2ff;
-  --color-primary-100: #e0e7ff;
-  --color-primary-200: #c7d2fe;
-  --color-primary-300: #a5b4fc;
-  --color-primary-400: #818cf8;
-  --color-primary-500: #6366f1;
-  --color-primary-600: #4f46e5;
-  --color-primary-700: #4338ca;
-  --color-primary-800: #3730a3;
-  --color-primary-900: #312e81;
+  /* 品牌色（靛蓝，Linear #5E6AD2 微调） */
+  --color-primary-50: #f2f3fd;
+  --color-primary-100: #e5e7fb;
+  --color-primary-200: #cbd0f6;
+  --color-primary-300: #a8b0ee;
+  --color-primary-400: #8b95e6;
+  --color-primary-500: #5e6ad2;
+  --color-primary-600: #4d58c4;
+  --color-primary-700: #414aa5;
+  --color-primary-800: #363d84;
+  --color-primary-900: #2c3268;
 
-  /* 语义色 */
-  --color-success-50: #f0fdf4;
-  --color-success-500: #22c55e;
-  --color-success-700: #15803d;
-  --color-warning-50: #fffbeb;
-  --color-warning-500: #f59e0b;
-  --color-warning-700: #b45309;
-  --color-danger-50: #fef2f2;
-  --color-danger-500: #ef4444;
-  --color-danger-700: #b91c1c;
-  --color-info-50: #eff6ff;
-  --color-info-500: #3b82f6;
-  --color-info-700: #1d4ed8;
+  /* 语义色（降低饱和度，与中性色更协调） */
+  --color-success-50: #eefaf3;
+  --color-success-500: #2f9e63;
+  --color-success-700: #217a4a;
+  --color-warning-50: #fdf7e8;
+  --color-warning-500: #d99b28;
+  --color-warning-700: #a5711a;
+  --color-danger-50: #fdf1f1;
+  --color-danger-500: #d64545;
+  --color-danger-700: #a82f2f;
+  --color-info-50: #eef4fe;
+  --color-info-500: #3b7ddd;
+  --color-info-700: #2a5fae;
 
-  /* 中性色（灰阶） */
-  --color-neutral-50: #f9fafb;
-  --color-neutral-100: #f3f4f6;
-  --color-neutral-200: #e5e7eb;
-  --color-neutral-300: #d1d5db;
-  --color-neutral-400: #9ca3af;
-  --color-neutral-500: #6b7280;
-  --color-neutral-600: #4b5563;
-  --color-neutral-700: #374151;
-  --color-neutral-800: #1f2937;
-  --color-neutral-900: #111827;
+  /* 中性色（冷灰阶） */
+  --color-neutral-50: #fafafa;
+  --color-neutral-100: #f4f4f5;
+  --color-neutral-200: #e6e6e9;
+  --color-neutral-300: #d5d5da;
+  --color-neutral-400: #a3a3ac;
+  --color-neutral-500: #74747f;
+  --color-neutral-600: #55555f;
+  --color-neutral-700: #3f3f47;
+  --color-neutral-800: #26262c;
+  --color-neutral-900: #18181c;
+  --color-neutral-950: #0b0b0d;
 
-  /* 圆角与阴影 */
-  --radius-field: 0.5rem;
-  --radius-card: 0.75rem;
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.06), 0 1px 3px rgb(0 0 0 / 0.1);
-  --shadow-pop: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  /* 圆角：小半径更接近工具型产品 */
+  --radius-field: 0.375rem;
+  --radius-card: 0.5rem;
+
+  /* 阴影：只保留极浅一层，避免页面「浮起来」 */
+  --shadow-card: 0 1px 2px rgb(16 17 20 / 0.04);
+  --shadow-pop: 0 12px 32px -12px rgb(16 17 20 / 0.28), 0 1px 2px rgb(16 17 20 / 0.06);
+  --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.1);
 
   /* 字体 */
-  --font-sans: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Inter", sans-serif;
+  --font-sans: 'Inter', system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+/*
+ * 表面与文字层级：布局与页面统一用 bg-[var(--surface)]、border-[var(--border)]、
+ * text-[var(--text-muted)] 这类变量，主题切换只改这里。
+ */
+:root {
+  --canvas: #fafafa;
+  --surface: #ffffff;
+  --surface-muted: #f6f6f7;
+  --surface-hover: #f1f1f3;
+  --border: #e6e6e9;
+  --border-strong: #d7d7dc;
+  --text-strong: #18181c;
+  --text: #3f3f47;
+  --text-muted: #74747f;
+}
+
+.dark {
+  --canvas: #0b0b0d;
+  --surface: #131316;
+  --surface-muted: #0f0f11;
+  --surface-hover: #1c1c20;
+  --border: #26262b;
+  --border-strong: #35353c;
+  --text-strong: #f4f4f5;
+  --text: #c9c9cf;
+  --text-muted: #8b8b95;
 }
 
 /* 暗色模式：跟随 class 策略（html.dark） */

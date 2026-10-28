@@ -1,6 +1,12 @@
 @import 'tailwindcss';
 @import '@club-oa/ui/theme.css';
 
+/*
+ * 共享 UI 包经 pnpm workspace 以符号链接接入 node_modules，Tailwind 默认不扫描 node_modules，
+ * 这里显式声明真实源码目录，否则 @club-oa/ui 组件里的类名不会被生成。
+ */
+@source '../../../../packages/ui/src/**/*.{vue,ts}';
+
 /* 全局基础样式 */
 html,
 body {
@@ -8,5 +14,38 @@ body {
 }
 
 body {
-  @apply bg-neutral-50 font-sans text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100;
+  @apply bg-[var(--canvas)] font-sans text-[13px] text-neutral-900 antialiased dark:text-neutral-100;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-primary-500) 24%, transparent);
+}
+
+/* 细滚动条：工具型产品的默认观感 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 统一的键盘焦点样式（不干扰鼠标操作） */
+:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--color-primary-500) 55%, transparent);
+  outline-offset: 2px;
 }

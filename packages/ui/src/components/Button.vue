@@ -1,7 +1,9 @@
 <script setup lang="ts">
 /**
  * 通用按钮：统一风格的基础交互组件。
- * 支持主/次/幽灵/危险四种样式，sm/md/lg 三种尺寸与加载态。
+ *
+ * 风格：工具型产品的紧凑按钮（28/32/40px 三档），主按钮用强调色 + 顶部内高光，
+ * 次要按钮靠边框区分层级，幽灵按钮只在 hover 时出现底色。
  */
 import { computed } from 'vue'
 
@@ -37,21 +39,23 @@ const emit = defineEmits<{ (event: 'click', ev: MouseEvent): void }>()
 
 /** 根据 variant/size 组合 class，供测试断言与样式统一。 */
 const classes = computed(() => [
-  'inline-flex items-center justify-center gap-2 font-medium transition-colors',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2',
-  'disabled:cursor-not-allowed disabled:opacity-60',
+  'inline-flex select-none items-center justify-center gap-1.5 rounded-[var(--radius-field)] font-medium whitespace-nowrap',
+  'transition-[background-color,border-color,color,box-shadow] duration-150',
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]',
+  'disabled:cursor-not-allowed disabled:opacity-55',
   props.block ? 'w-full' : '',
   {
-    sm: 'h-8 px-3 text-sm rounded-[var(--radius-field)]',
-    md: 'h-10 px-4 text-sm rounded-[var(--radius-field)]',
-    lg: 'h-12 px-6 text-base rounded-[var(--radius-field)]',
+    sm: 'h-7 px-2.5 text-[12px]',
+    md: 'h-8 px-3 text-[13px]',
+    lg: 'h-10 px-4 text-sm',
   }[props.size],
   {
-    primary: 'bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800',
+    primary:
+      'bg-primary-600 text-white shadow-[var(--shadow-inset)] ring-1 ring-primary-700/30 ring-inset hover:bg-primary-700 active:bg-primary-800',
     secondary:
-      'border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-50 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-neutral-700',
-    ghost: 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800',
-    danger: 'bg-danger-500 text-white hover:bg-danger-700',
+      'border border-[var(--border-strong)] bg-[var(--surface)] text-neutral-800 hover:bg-[var(--surface-hover)] active:bg-[var(--surface-muted)] dark:text-neutral-100',
+    ghost: 'text-neutral-600 hover:bg-[var(--surface-hover)] dark:text-neutral-300',
+    danger: 'bg-danger-500 text-white shadow-[var(--shadow-inset)] hover:bg-danger-700',
   }[props.variant],
 ])
 
@@ -66,7 +70,7 @@ function onClick(event: MouseEvent) {
   <button :type="type" :class="classes" :disabled="disabled || loading" @click="onClick">
     <span
       v-if="loading"
-      class="size-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+      class="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
       aria-hidden="true"
     />
     <slot />

@@ -10,13 +10,18 @@ const paths: Record<string, string> = {
   calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
   folder: 'M3 6h6l2 2h10v11H3z',
   bell: 'M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 0 0 4 0',
-  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM4 12h2M18 12h2M12 4v2M12 18v2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4',
+  settings:
+    'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM4 12h2M18 12h2M12 4v2M12 18v2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4',
   plus: 'M12 5v14M5 12h14',
   search: 'M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14ZM15 15l6 6',
   send: 'M4 12 20 4l-4 16-4-7zM20 4l-8 9',
   users: 'M8 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM2 21a6 6 0 0 1 12 0M16 3.5a4 4 0 0 1 0 7M18 21a6 6 0 0 0-2-4.5',
   logout: 'M15 4h4v16h-4M10 12H3m0 0 4-4m-4 4 4 4',
   menu: 'M4 6h16M4 12h16M4 18h16',
+  arrowRight: 'M5 12h14M13 6l6 6-6 6',
+  arrowUpRight: 'M7 17 17 7M9 7h8v8',
+  inbox: 'M4 13h4l2 3h4l2-3h4M4 13l2-8h12l2 8v6H4z',
+  bolt: 'M13 3 5 14h6l-1 7 8-11h-6z',
 }
 </script>
 

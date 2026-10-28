@@ -18,7 +18,7 @@ describe('Button', () => {
     })
     const classes = wrapper.classes().join(' ')
     expect(classes).toContain('bg-danger-500')
-    expect(classes).toContain('h-12')
+    expect(classes).toContain('h-10')
   })
 
   it('点击时触发 click 事件', async () => {

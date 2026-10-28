@@ -26,29 +26,29 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div class="absolute inset-0 bg-neutral-900/40 backdrop-blur-sm" @click="emit('close')" />
+      <div class="absolute inset-0 bg-neutral-950/40 backdrop-blur-[2px]" @click="emit('close')" />
       <div
-        class="relative w-full rounded-[var(--radius-card)] bg-white shadow-[var(--shadow-pop)] dark:bg-neutral-900"
+        class="relative w-full overflow-hidden rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)]"
         :class="width ?? 'max-w-md'"
       >
         <header
-          class="flex items-center justify-between border-b border-neutral-200 px-5 py-3 dark:border-neutral-800"
+          class="flex items-center justify-between border-b border-[var(--border)] px-4 py-2.5"
         >
-          <h2 class="text-sm font-semibold">{{ title }}</h2>
+          <h2 class="text-[13px] font-medium text-[var(--text-strong)]">{{ title }}</h2>
           <button
-            class="rounded p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800"
+            class="rounded-[var(--radius-field)] p-1 text-neutral-400 transition hover:bg-[var(--surface-hover)] hover:text-neutral-600"
             aria-label="关闭"
             @click="emit('close')"
           >
             ✕
           </button>
         </header>
-        <div class="max-h-[70vh] overflow-y-auto px-5 py-4">
+        <div class="max-h-[70vh] overflow-y-auto px-4 py-4">
           <slot />
         </div>
         <footer
           v-if="$slots.footer"
-          class="flex justify-end gap-2 border-t border-neutral-200 px-5 py-3 dark:border-neutral-800"
+          class="flex justify-end gap-2 border-t border-[var(--border)] px-4 py-2.5"
         >
           <slot name="footer" />
         </footer>

@@ -7,11 +7,11 @@ const props = withDefaults(
 
 const palette = [
   'bg-primary-500',
-  'bg-emerald-500',
-  'bg-amber-500',
-  'bg-rose-500',
-  'bg-sky-500',
-  'bg-violet-500',
+  'bg-emerald-400',
+  'bg-amber-400',
+  'bg-rose-400',
+  'bg-sky-400',
+  'bg-violet-400',
 ]
 
 const initial = computed(() => (props.name?.trim()?.[0] ?? '?').toUpperCase())
