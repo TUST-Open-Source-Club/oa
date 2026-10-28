@@ -360,6 +360,29 @@ pub async fn insert_message(
     Ok((model, true))
 }
 
+/// 会话中是否存在未读的 @ 提及（`seq` 大于已读位点且 `mentions` 含该用户）。
+pub async fn has_unread_mention(
+    db: &DatabaseConnection,
+    conversation_id: Uuid,
+    user_id: Uuid,
+    after_seq: i64,
+) -> Result<bool, AppError> {
+    // 未读消息量有界（未读位点之后），这里在应用层判断 jsonb 数组，避免依赖 SQL 方言细节
+    let unread = message::Entity::find()
+        .filter(message::Column::ConversationId.eq(conversation_id))
+        .filter(message::Column::Seq.gt(after_seq))
+        .all(db)
+        .await
+        .map_err(map_db_err)?;
+    let needle = user_id.to_string();
+    Ok(unread.iter().any(|row| {
+        row.mentions
+            .as_array()
+            .map(|items| items.iter().any(|v| v.as_str() == Some(needle.as_str())))
+            .unwrap_or(false)
+    }))
+}
+
 /// 按序号倒序分页拉取历史消息（返回按 seq 升序）。
 pub async fn list_messages(
     db: &DatabaseConnection,

@@ -110,6 +110,8 @@ pub struct ConversationDto {
     pub only_admins_speak: bool,
     /// 未读数。
     pub unread: i64,
+    /// 是否有未读的 @ 提及。
+    pub has_mention: bool,
     /// 是否免打扰。
     pub muted: bool,
     /// 是否置顶。
@@ -140,6 +142,13 @@ pub async fn list_conversations(
             notice: row.conversation.notice.clone(),
             only_admins_speak: row.conversation.only_admins_speak,
             unread: repo::unread_for(&row.conversation, &row.member),
+            has_mention: repo::has_unread_mention(
+                &state.db,
+                row.conversation.id,
+                user_id,
+                row.member.last_read_seq,
+            )
+            .await?,
             muted: row.member.muted,
             pinned: row.member.pinned,
             member_ids: members.iter().map(|m| m.user_id.to_string()).collect(),
@@ -227,6 +236,7 @@ pub async fn create_conversation(
         notice: conversation.notice.clone(),
         only_admins_speak: conversation.only_admins_speak,
         unread: repo::unread_for(&conversation, &member),
+        has_mention: false,
         muted: member.muted,
         pinned: member.pinned,
         member_ids: members.iter().map(|m| m.user_id.to_string()).collect(),

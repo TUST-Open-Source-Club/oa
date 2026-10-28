@@ -156,3 +156,39 @@ async fn direct_chat_rejects_mention_all() {
     let sent = send_with_mentions(&app, &token_a, &conversation_id, json!(["@all"])).await;
     sent.expect(StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn conversation_list_flags_unread_mention() {
+    let app = spawn().await;
+    let owner = Uuid::now_v7();
+    let member = Uuid::now_v7();
+    let owner_token = issue_token(&app, owner);
+    let member_token = issue_token(&app, member);
+    let conversation_id = create_group(&app, &owner_token, &[member], "提及测试群").await;
+
+    send_with_mentions(
+        &app,
+        &owner_token,
+        &conversation_id,
+        json!([member.to_string()]),
+    )
+    .await
+    .expect(StatusCode::CREATED);
+
+    let list = request(
+        &app.app,
+        "GET",
+        "/api/v1/im/conversations",
+        Some(&member_token),
+        None,
+    )
+    .await;
+    let body = list.expect(StatusCode::OK);
+    let item = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == conversation_id)
+        .expect("会话存在");
+    assert_eq!(item["hasMention"], true, "被 @ 的成员会话应标记 hasMention");
+}
