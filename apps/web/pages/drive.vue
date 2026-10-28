@@ -378,17 +378,17 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
 
 <template>
   <div
-    class="flex h-[calc(100vh-7.5rem)] gap-4"
+    class="mx-auto flex h-[calc(100vh-7rem)] w-full max-w-[1440px] gap-3"
     @dragover.prevent="dragging = true"
     @dragleave="dragging = false"
     @drop.prevent="onDrop"
   >
     <!-- 侧栏 -->
-    <aside class="hidden w-56 shrink-0 flex-col md:flex">
-      <div class="mb-3 flex items-center justify-between px-1">
-        <h1 class="text-base font-semibold">网盘</h1>
+    <aside class="hidden w-[224px] shrink-0 flex-col rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] p-2 shadow-[var(--shadow-card)] md:flex">
+      <div class="mb-2 flex h-7 items-center justify-between px-1">
+        <span class="text-[10px] font-medium tracking-[0.12em] text-neutral-400 uppercase">空间</span>
         <button
-          class="rounded p-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          class="rounded-[var(--radius-field)] p-1 text-neutral-400 hover:bg-[var(--surface-hover)]"
           aria-label="新建空间"
           @click="createSpaceOpen = true"
         >
@@ -399,11 +399,11 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
         <button
           v-for="space in spaces"
           :key="space.id"
-          class="flex w-full items-center gap-2 rounded-[var(--radius-field)] px-2.5 py-2 text-left text-sm transition"
+          class="flex w-full items-center gap-2 rounded-[var(--radius-field)] px-2.5 py-2 text-left text-[13px] transition"
           :class="
             space.id === spaceId && !showTrash
-              ? 'bg-primary-50 font-medium text-primary-700 dark:bg-primary-900/40 dark:text-primary-200'
-              : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+              ? 'bg-[var(--surface-hover)] font-medium text-[var(--text-strong)]'
+              : 'text-neutral-600 hover:bg-[var(--surface-hover)] dark:text-neutral-300'
           "
           @click="spaceId = space.id; switchSpace()"
         >
@@ -411,13 +411,13 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
           <span class="truncate">{{ space.name }}</span>
         </button>
       </nav>
-      <div class="mt-3 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+      <div class="mt-3 border-t border-[var(--border)] pt-3">
         <button
-          class="flex w-full items-center gap-2 rounded-[var(--radius-field)] px-2.5 py-2 text-sm transition"
+          class="flex w-full items-center gap-2 rounded-[var(--radius-field)] px-2.5 py-2 text-[13px] transition"
           :class="
             showTrash
-              ? 'bg-primary-50 font-medium text-primary-700 dark:bg-primary-900/40'
-              : 'text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+              ? 'bg-[var(--surface-hover)] font-medium text-[var(--text-strong)]'
+              : 'text-neutral-500 hover:bg-[var(--surface-hover)]'
           "
           @click="showTrash = !showTrash; loadNodes()"
         >
@@ -432,11 +432,11 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
     </aside>
 
     <!-- 主区域 -->
-    <div class="flex min-w-0 flex-1 flex-col rounded-[var(--radius-card)] border border-neutral-200 bg-white shadow-[var(--shadow-card)] dark:border-neutral-800 dark:bg-neutral-900">
+    <div class="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-card)]">
       <!-- 工具栏 -->
-      <div class="border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
+      <div class="border-b border-[var(--border)] px-4 py-3">
         <div class="flex flex-wrap items-center gap-2">
-          <nav class="flex min-w-0 flex-1 items-center gap-1 text-sm">
+          <nav class="flex min-w-0 flex-1 items-center gap-1 text-[13px]">
             <button class="shrink-0 font-medium text-primary-600 hover:underline" @click="goUp(0)">
               {{ showTrash ? '回收站' : (currentSpace?.name ?? '空间') }}
             </button>
@@ -451,15 +451,15 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
           </nav>
           <div class="flex items-center gap-1.5">
             <div class="relative hidden sm:block">
-              <AppIcon name="search" class="absolute top-2.5 left-2.5 size-4 text-neutral-400" />
+              <AppIcon name="search" class="absolute top-2 left-2.5 size-4 text-neutral-400" />
               <input
                 v-model="keyword"
                 placeholder="搜索当前目录"
-                class="h-9 w-44 rounded-[var(--radius-field)] border border-neutral-300 bg-transparent pr-2 pl-8 text-sm outline-none focus:border-primary-500 dark:border-neutral-700"
+                class="h-8 w-40 rounded-[var(--radius-field)] border border-neutral-300 bg-transparent pr-2 pl-8 text-[13px] outline-none focus:border-primary-500 dark:border-neutral-700"
               />
             </div>
             <button
-              class="rounded-[var(--radius-field)] p-2 text-neutral-500 transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              class="rounded-[var(--radius-field)] p-2 text-neutral-500 transition hover:bg-[var(--surface-hover)]"
               :aria-label="viewMode === 'grid' ? '列表视图' : '网格视图'"
               @click="viewMode = viewMode === 'grid' ? 'list' : 'grid'"
             >
@@ -469,7 +469,7 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
         </div>
         <div v-if="!showTrash" class="mt-2 flex flex-wrap items-center gap-2">
           <label
-            class="inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-field)] bg-primary-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-700"
+            class="inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-field)] bg-primary-600 px-3 py-1.5 text-[13px] font-medium text-white shadow-[var(--shadow-inset)] ring-1 ring-primary-700/30 ring-inset transition hover:bg-primary-700"
           >
             <AppIcon name="plus" class="size-4" />
             {{ uploading ? `上传中 ${uploadDone}/${uploadTotal}` : '上传文件' }}
@@ -481,7 +481,7 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
         </div>
       </div>
 
-      <p v-if="errorMessage" class="px-4 pt-3 text-sm text-danger-500">{{ errorMessage }}</p>
+      <p v-if="errorMessage" class="px-4 pt-3 text-[13px] text-danger-500">{{ errorMessage }}</p>
 
       <!-- 内容 -->
       <div class="flex-1 overflow-y-auto px-4 py-4">
@@ -490,13 +490,13 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
             <div
               v-for="node in trashed"
               :key="node.id"
-              class="flex items-center justify-between rounded-[var(--radius-field)] border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-800"
+              class="flex items-center justify-between rounded-[var(--radius-field)] border border-[var(--border)] px-3 py-2 text-[13px]"
             >
               <span class="truncate text-neutral-500">{{ node.name }}</span>
               <Button variant="ghost" size="sm" @click="restoreNode(node)">恢复</Button>
             </div>
           </div>
-          <p v-else class="py-16 text-center text-sm text-neutral-400">回收站为空</p>
+          <p v-else class="py-16 text-center text-[13px] text-neutral-400">回收站为空</p>
         </template>
 
         <template v-else>
@@ -504,7 +504,7 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
             <div
               v-for="node in filteredNodes"
               :key="node.id"
-              class="group cursor-pointer rounded-[var(--radius-card)] border border-neutral-200 p-3 transition hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-[var(--shadow-card)] dark:border-neutral-800 dark:hover:border-primary-700"
+              class="group cursor-pointer rounded-[var(--radius-card)] border border-[var(--border)] p-3 transition hover:border-[var(--border-strong)]"
               @contextmenu.prevent="openMenu($event, node)"
               @dblclick="node.kind === 'folder' ? openFolder(node) : canPreview(node) ? preview(node) : download(node)"
             >
@@ -515,7 +515,7 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
                 <div class="flex gap-0.5 opacity-0 transition group-hover:opacity-100">
                   <button
                     v-if="canPreview(node)"
-                    class="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-primary-600 dark:hover:bg-neutral-800"
+                    class="rounded-[var(--radius-field)] p-1 text-neutral-400 hover:bg-[var(--surface-hover)] hover:text-primary-600"
                     aria-label="预览"
                     @click.stop="preview(node)"
                   >
@@ -523,21 +523,21 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
                   </button>
                   <button
                     v-if="node.kind === 'file'"
-                    class="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-primary-600 dark:hover:bg-neutral-800"
+                    class="rounded-[var(--radius-field)] p-1 text-neutral-400 hover:bg-[var(--surface-hover)] hover:text-primary-600"
                     aria-label="下载"
                     @click.stop="download(node)"
                   >
                     <AppIcon name="logout" class="size-4" />
                   </button>
                   <button
-                    class="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-primary-600 dark:hover:bg-neutral-800"
+                    class="rounded-[var(--radius-field)] p-1 text-neutral-400 hover:bg-[var(--surface-hover)] hover:text-primary-600"
                     aria-label="分享"
                     @click.stop="openShare(node)"
                   >
                     <AppIcon name="users" class="size-4" />
                   </button>
                   <button
-                    class="rounded p-1 text-neutral-400 hover:bg-danger-50 hover:text-danger-500 dark:hover:bg-danger-500/10"
+                    class="rounded-[var(--radius-field)] p-1 text-neutral-400 hover:bg-danger-50 hover:text-danger-500 dark:hover:bg-danger-500/10"
                     aria-label="删除"
                     @click.stop="removeNode(node)"
                   >
@@ -546,7 +546,7 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
                 </div>
               </div>
               <button
-                class="mt-3 block w-full truncate text-left text-sm font-medium"
+                class="mt-3 block w-full truncate text-left text-[13px] font-medium"
                 @click="node.kind === 'folder' ? openFolder(node) : canPreview(node) ? preview(node) : download(node)"
               >
                 {{ node.name }}
@@ -557,11 +557,11 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
             </div>
           </div>
 
-          <div v-else class="divide-y divide-neutral-100 dark:divide-neutral-800">
+          <div v-else class="divide-y divide-[var(--border)]">
             <div
               v-for="node in filteredNodes"
               :key="node.id"
-              class="group flex items-center gap-3 py-2 text-sm"
+              class="group flex items-center gap-3 py-2 text-[13px]"
               @contextmenu.prevent="openMenu($event, node)"
             >
               <span class="flex size-8 shrink-0 items-center justify-center rounded-lg" :class="fileStyle(node).class">
@@ -587,7 +587,7 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
 
           <p
             v-if="filteredNodes.length === 0"
-            class="py-16 text-center text-sm text-neutral-400"
+            class="py-16 text-center text-[13px] text-neutral-400"
           >
             {{ keyword ? '没有匹配的文件' : '空目录，拖拽文件到这里上传' }}
           </p>
@@ -596,7 +596,7 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
 
       <div
         v-if="dragging"
-        class="pointer-events-none absolute inset-2 flex items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-primary-400 bg-primary-50/80 text-sm font-medium text-primary-700 dark:bg-primary-900/40"
+        class="pointer-events-none absolute inset-2 flex items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-primary-400 bg-primary-50/80 text-[13px] font-medium text-primary-700 dark:bg-primary-900/40"
       >
         松开鼠标上传到当前目录
       </div>
@@ -604,37 +604,37 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
 
     <div
       v-if="menu.open && menu.node"
-      class="fixed z-50 w-40 overflow-hidden rounded-[var(--radius-field)] border border-neutral-200 bg-white py-1 text-sm shadow-[var(--shadow-pop)] dark:border-neutral-700 dark:bg-neutral-900"
+      class="fixed z-50 w-40 overflow-hidden rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] py-1 text-[13px] shadow-[var(--shadow-pop)] dark:border-neutral-700"
       :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
       @click.stop
     >
       <button
         v-if="menu.node.kind === 'folder' || canPreview(menu.node)"
-        class="block w-full px-3 py-1.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
         @click="runMenu(() => openNode(menu.node!))"
       >
         {{ menu.node.kind === 'folder' ? '打开' : '预览' }}
       </button>
       <button
         v-if="menu.node.kind === 'file'"
-        class="block w-full px-3 py-1.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
         @click="runMenu(() => download(menu.node!))"
       >
         下载
       </button>
       <button
-        class="block w-full px-3 py-1.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
         @click="runMenu(() => openShare(menu.node!))"
       >
         分享
       </button>
       <button
-        class="block w-full px-3 py-1.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
         @click="runMenu(() => openChanges(menu.node!))"
       >
         操作记录
       </button>
-      <div class="my-1 border-t border-neutral-100 dark:border-neutral-800" />
+      <div class="my-1 border-t border-neutral-100" />
       <button
         class="block w-full px-3 py-1.5 text-left text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-500/10"
         @click="runMenu(() => removeNode(menu.node!))"
@@ -644,12 +644,12 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
     </div>
 
     <AppModal :open="changesOpen" title="操作记录" @close="changesOpen = false">
-      <p class="mb-2 truncate text-sm text-neutral-500">{{ changesNode?.name }}</p>
+      <p class="mb-2 truncate text-[13px] text-neutral-500">{{ changesNode?.name }}</p>
       <div v-if="changes.length" class="space-y-1.5">
         <div
           v-for="change in changes"
           :key="change.id"
-          class="flex items-center justify-between rounded-[var(--radius-field)] border border-neutral-200 px-2.5 py-1.5 text-sm dark:border-neutral-700"
+          class="flex items-center justify-between rounded-[var(--radius-field)] border border-[var(--border)] px-2.5 py-1.5 text-[13px] dark:border-neutral-700"
         >
           <span class="text-neutral-500">
             {{ change.action === 'delete' ? '删除' : change.action === 'undo' ? '撤销' : change.action }}
@@ -658,7 +658,7 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
           <button class="text-primary-600 hover:underline" @click="undoChange(change)">撤销</button>
         </div>
       </div>
-      <p v-else class="text-sm text-neutral-400">暂无操作记录</p>
+      <p v-else class="text-[13px] text-neutral-400">暂无操作记录</p>
     </AppModal>
 
     <!-- 新建空间 -->
@@ -681,19 +681,19 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
 
     <!-- 分享 -->
     <AppModal :open="shareOpen" title="分享文件" @close="shareOpen = false">
-      <p class="mb-3 truncate text-sm text-neutral-500">「{{ shareNode?.name }}」</p>
+      <p class="mb-3 truncate text-[13px] text-neutral-500">「{{ shareNode?.name }}」</p>
       <template v-if="!shareUrl">
         <div class="space-y-3">
-          <label class="block text-sm">
+          <label class="block text-[13px]">
             <span class="mb-1 block text-xs text-neutral-500">访问密码（可选）</span>
             <Input v-model="sharePassword" type="password" placeholder="4~64 位，留空则无密码" />
           </label>
           <div class="grid grid-cols-2 gap-3">
-            <label class="block text-sm">
+            <label class="block text-[13px]">
               <span class="mb-1 block text-xs text-neutral-500">有效期</span>
               <select
                 v-model="shareExpires"
-                class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700"
+                class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-[13px] dark:border-neutral-700"
               >
                 <option value="0">永久</option>
                 <option value="86400">1 天</option>
@@ -701,13 +701,13 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
                 <option value="2592000">30 天</option>
               </select>
             </label>
-            <label class="block text-sm">
+            <label class="block text-[13px]">
               <span class="mb-1 block text-xs text-neutral-500">下载次数上限</span>
               <input
                 v-model.number="shareMaxDownloads"
                 type="number"
                 min="0"
-                class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700"
+                class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-[13px] dark:border-neutral-700"
                 placeholder="0 = 不限"
               />
             </label>
@@ -731,7 +731,7 @@ onUnmounted(() => window.removeEventListener('click', closeMenu))
             v-if="shareQr"
             :src="shareQr"
             alt="分享二维码"
-            class="mx-auto size-56 rounded-lg border border-neutral-200 bg-white p-2 dark:border-neutral-700"
+            class="mx-auto size-56 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 dark:border-neutral-700"
           />
           <p class="text-center text-xs text-neutral-400">扫码或复制链接即可访问</p>
         </div>
