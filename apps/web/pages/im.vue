@@ -167,6 +167,10 @@ const typingUsers = computed(() => {
     .map((id) => users.value[id]?.nickname ?? '成员')
 })
 let lastTypingAt = 0
+/** 收藏夹状态。 */
+const favoritesOpen = ref(false)
+const favorites = ref<Array<MessageItem & { conversationId: string }>>([])
+const favoritesLoading = ref(false)
 /** 搜索面板状态。 */
 const searchOpen = ref(false)
 const searchQuery = ref('')
@@ -625,6 +629,36 @@ async function toggleReaction(message: MessageItem, emoji: string) {
   }
 }
 
+/** 打开/关闭收藏夹。 */
+async function toggleFavorites() {
+  favoritesOpen.value = !favoritesOpen.value
+  if (!favoritesOpen.value) return
+  searchOpen.value = false
+  await loadFavorites()
+}
+
+/** 拉取我收藏的消息。 */
+async function loadFavorites() {
+  favoritesLoading.value = true
+  error.value = ''
+  try {
+    favorites.value = await api<Array<MessageItem & { conversationId: string }>>(
+      'messages/starred',
+    )
+    await resolveUsers(favorites.value.map((row) => row.senderId ?? ''))
+  } catch (err) {
+    error.value = apiErrorMessage(err)
+  } finally {
+    favoritesLoading.value = false
+  }
+}
+
+/** 跳到收藏的消息。 */
+async function openFavorite(hit: MessageItem & { conversationId: string }) {
+  favoritesOpen.value = false
+  await openSearchResult(hit)
+}
+
 /** 搜索消息（防抖 300ms，跨会话）。 */
 function onSearchInput() {
   clearTimeout(searchTimer)
@@ -936,6 +970,15 @@ onUnmounted(() => {
         </div>
         <div class="flex items-center gap-0.5">
           <button
+            class="rounded-[var(--radius-field)] p-1 transition hover:bg-[var(--surface-hover)]"
+            :class="favoritesOpen ? 'text-primary-600' : 'text-neutral-400 hover:text-neutral-600'"
+            title="收藏夹"
+            aria-label="收藏夹"
+            @click="toggleFavorites"
+          >
+            <AppIcon name="star" class="size-4" />
+          </button>
+          <button
             class="rounded-[var(--radius-field)] p-1 text-neutral-400 transition hover:bg-[var(--surface-hover)] hover:text-neutral-600"
             title="搜索消息"
             aria-label="搜索消息"
@@ -964,7 +1007,38 @@ onUnmounted(() => {
         />
       </div>
 
-      <div v-if="searchOpen && searchQuery.trim()" class="flex-1 overflow-y-auto px-1.5 pb-2">
+      <div v-if="favoritesOpen" class="flex-1 overflow-y-auto px-1.5 pb-2">
+        <p v-if="favoritesLoading" class="px-3 py-6 text-center text-[11px] text-neutral-400">加载中…</p>
+        <p
+          v-else-if="favorites.length === 0"
+          class="px-3 py-6 text-center text-[11px] text-neutral-400"
+        >
+          还没有收藏的消息
+        </p>
+        <template v-else>
+          <button
+            v-for="hit in favorites"
+            :key="hit.id"
+            class="mb-0.5 block w-full rounded-[var(--radius-field)] px-2 py-2 text-left transition-colors hover:bg-[var(--surface-hover)]"
+            @click="openFavorite(hit)"
+          >
+            <span class="flex items-center justify-between gap-2 text-[11px] text-neutral-400">
+              <span class="truncate">
+                {{ conversations.find((item) => item.id === hit.conversationId)?.name ?? '私聊' }}
+              </span>
+              <span class="shrink-0">{{ timeOf(hit.createdAt) }}</span>
+            </span>
+            <span class="mt-0.5 block truncate text-[12px] text-[var(--text-strong)]">
+              {{ hit.content?.text ?? '[非文本消息]' }}
+            </span>
+            <span class="mt-0.5 block text-[10px] text-neutral-400">
+              {{ users[hit.senderId ?? '']?.nickname ?? '成员' }}
+            </span>
+          </button>
+        </template>
+      </div>
+
+      <div v-else-if="searchOpen && searchQuery.trim()" class="flex-1 overflow-y-auto px-1.5 pb-2">
         <p v-if="searching" class="px-3 py-6 text-center text-[11px] text-neutral-400">搜索中…</p>
         <p
           v-else-if="searchResults.length === 0"
