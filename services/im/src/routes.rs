@@ -133,6 +133,28 @@ fn reaction_dtos(groups: &[repo::ReactionGroup], viewer: Uuid) -> Vec<ReactionDt
         .collect()
 }
 
+/// 输出用 DTO：附件在**返回时**重新签发下载 URL，避免消息里存的旧 token 过期裂图。
+pub fn message_dto(state: &SharedState, model: &message::Model) -> MessageDto {
+    let mut dto = MessageDto::from(model);
+    if let Some(Value::Array(items)) = model.content.get("attachments") {
+        let mut rewritten = Vec::with_capacity(items.len());
+        for item in items {
+            let mut obj = item.clone();
+            if let Some(id) = obj.get("id").and_then(Value::as_str) {
+                if let Ok(file_id) = Uuid::parse_str(id) {
+                    if let Ok(token) = sign_file_token(&state.config.internal_secret, file_id) {
+                        obj["token"] = json!(token);
+                        obj["url"] = json!(format!("/api/v1/im/files/{file_id}?token={token}"));
+                    }
+                }
+            }
+            rewritten.push(obj);
+        }
+        dto.content["attachments"] = Value::Array(rewritten);
+    }
+    dto
+}
+
 /// 会话 DTO。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -203,7 +225,7 @@ pub async fn list_conversations(
                 .map(|id| id.to_string())
                 .collect(),
             member_ids: members.iter().map(|m| m.user_id.to_string()).collect(),
-            last_message: last.first().map(MessageDto::from),
+            last_message: last.first().map(|item| message_dto(&state, item)),
             updated_at: row.conversation.updated_at,
         });
     }
@@ -333,7 +355,7 @@ pub async fn list_messages(
         items
             .iter()
             .map(|item| {
-                let mut dto = MessageDto::from(item);
+                let mut dto = message_dto(&state, item);
                 dto.thread_reply_count = counts.get(&item.id).copied().unwrap_or(0);
                 dto.reactions = reaction_dtos(
                     reactions.get(&item.id).map(Vec::as_slice).unwrap_or(&[]),
@@ -453,7 +475,7 @@ pub async fn send_message(
     } else {
         StatusCode::OK
     };
-    Ok((status, Json(MessageDto::from(&model))))
+    Ok((status, Json(message_dto(&state, &model))))
 }
 
 /// 已读请求。
@@ -778,7 +800,7 @@ pub async fn recall_message(
     for member in members {
         state.hub.send_to(member.user_id, &event);
     }
-    Ok(Json(MessageDto::from(&model)))
+    Ok(Json(message_dto(&state, &model)))
 }
 
 /// `GET /conversations/{id}/messages/{message_id}/receipts`：已读回执。
@@ -1152,7 +1174,7 @@ pub async fn export_conversation(
                 "notice": ctx.conversation.notice,
                 "createdAt": ctx.conversation.created_at,
             },
-            "messages": messages.iter().map(MessageDto::from).collect::<Vec<_>>(),
+            "messages": messages.iter().map(|item| message_dto(&state, item)).collect::<Vec<_>>(),
         });
         let text = serde_json::to_string_pretty(&payload).map_err(AppError::internal)?;
         ("application/json; charset=utf-8", text, "json")
@@ -1234,7 +1256,7 @@ pub async fn list_starred(
         items
             .iter()
             .map(|item| {
-                let mut dto = MessageDto::from(item);
+                let mut dto = message_dto(&state, item);
                 dto.starred = true;
                 dto
             })
@@ -1289,7 +1311,7 @@ pub async fn edit_message(
     if edited {
         crate::realtime::broadcast_edited(&state, conversation_id, &model).await;
     }
-    Ok(Json(MessageDto::from(&model)))
+    Ok(Json(message_dto(&state, &model)))
 }
 
 /// `GET /conversations/{id}/messages/{message_id}/revisions`：编辑历史（版本倒序）。
@@ -1323,7 +1345,7 @@ pub async fn list_thread(
         replies
             .iter()
             .map(|item| {
-                let mut dto = MessageDto::from(item);
+                let mut dto = message_dto(&state, item);
                 dto.reactions = reaction_dtos(
                     reactions.get(&item.id).map(Vec::as_slice).unwrap_or(&[]),
                     user_id,
@@ -1381,7 +1403,9 @@ pub async fn search_in_conversation(
     repo::get_conversation_for_member(&state.db, conversation_id, user_id).await?;
     let items =
         crate::service::search_messages(&state, &[conversation_id], &query.q, query.limit).await?;
-    Ok(Json(items.iter().map(MessageDto::from).collect()))
+    Ok(Json(
+        items.iter().map(|item| message_dto(&state, item)).collect(),
+    ))
 }
 
 /// `GET /search/messages`：跨会话搜索（仅自己参与的会话）。
@@ -1397,7 +1421,9 @@ pub async fn search_messages(
         .map(|row| row.conversation.id)
         .collect();
     let items = crate::service::search_messages(&state, &ids, &query.q, query.limit).await?;
-    Ok(Json(items.iter().map(MessageDto::from).collect()))
+    Ok(Json(
+        items.iter().map(|item| message_dto(&state, item)).collect(),
+    ))
 }
 
 /// `/api/v1/im` 路由。

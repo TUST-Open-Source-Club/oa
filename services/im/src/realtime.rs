@@ -20,7 +20,7 @@ use club_common::AppError;
 
 use crate::entity::message;
 use crate::repo;
-use crate::routes::MessageDto;
+use crate::routes::message_dto;
 use crate::service;
 use crate::state::SharedState;
 
@@ -199,7 +199,7 @@ async fn handle_client_text(state: &SharedState, user_id: Uuid, text: &str) -> O
                     Some(json!({
                         "type": "message_ack",
                         "requestId": request_id,
-                        "payload": { "clientMsgId": client_msg_id, "message": MessageDto::from(&model) }
+                        "payload": { "clientMsgId": client_msg_id, "message": message_dto(state, &model) }
                     })
                     .to_string())
                 }
@@ -272,7 +272,7 @@ pub async fn broadcast_message(state: &SharedState, conversation_id: Uuid, model
     };
     let event = json!({
         "type": "message",
-        "payload": MessageDto::from(model)
+        "payload": message_dto(state, model)
     })
     .to_string();
     for member in members {
@@ -287,7 +287,7 @@ pub async fn broadcast_edited(state: &SharedState, conversation_id: Uuid, model:
     };
     let event = json!({
         "type": "message_edited",
-        "payload": MessageDto::from(model)
+        "payload": message_dto(state, model)
     })
     .to_string();
     for member in members {

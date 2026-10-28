@@ -215,3 +215,62 @@ async fn image_message_carries_attachment() {
         .unwrap()
         .contains("token="));
 }
+
+#[tokio::test]
+async fn history_resigns_attachment_urls() {
+    let app = spawn().await;
+    let owner = Uuid::now_v7();
+    let member = Uuid::now_v7();
+    let owner_token = issue_token(&app, owner);
+    let member_token = issue_token(&app, member);
+
+    let created = request(
+        &app.app,
+        "POST",
+        "/api/v1/im/conversations",
+        Some(&owner_token),
+        Some(&json!({ "type": "group", "name": "媒体群", "memberIds": [member] })),
+    )
+    .await;
+    let conversation_id = created.expect(StatusCode::CREATED)["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let attachment = upload(&app, &owner_token, "旧图.png", "image/png", b"old-bytes")
+        .await
+        .expect(StatusCode::CREATED);
+    // 模拟消息里存的旧 token/URL 已过期：只保留文件元数据，不带 url/token
+    let stored = json!({
+        "id": attachment["id"],
+        "name": attachment["name"],
+        "mime": attachment["mime"],
+        "size": attachment["size"],
+    });
+    request(
+        &app.app,
+        "POST",
+        &format!("/api/v1/im/conversations/{conversation_id}/messages"),
+        Some(&owner_token),
+        Some(&json!({ "type": "image", "content": { "attachments": [stored] } })),
+    )
+    .await
+    .expect(StatusCode::CREATED);
+
+    // 历史消息返回时重新签名，URL 可直接下载且内容正确
+    let history = request(
+        &app.app,
+        "GET",
+        &format!("/api/v1/im/conversations/{conversation_id}/messages"),
+        Some(&member_token),
+        None,
+    )
+    .await;
+    let list = history.expect(StatusCode::OK);
+    let url = list[0]["content"]["attachments"][0]["url"]
+        .as_str()
+        .expect("返回时补上签名 URL");
+    let raw = get_raw(&app, url).await;
+    assert_eq!(raw.status, StatusCode::OK);
+    assert_eq!(raw.body, b"old-bytes");
+}

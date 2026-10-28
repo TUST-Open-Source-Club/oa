@@ -190,3 +190,10 @@
   迁移 v11 在 im schema 建审计表；
 - 前端：会话右键「导出 Markdown / 导出 JSON」，带鉴权取 blob 后触发下载；
 - 用例：`services/im/tests/export_flow.rs`（4 条）。
+
+### 7.12 附件 URL 输出时重签（修复）
+
+原实现把签名 URL 存进消息 `content.attachments`，1 小时后过期导致历史图片裂图。
+现在消息里只保留 `id/name/mime/size`，**每次返回消息时重新签发**下载 URL
+（`routes::message_dto`，WS 推送同样适用）；新增用例 `history_resigns_attachment_urls`
+覆盖「存的附件没有 token，历史接口补签名后仍可下载」。
