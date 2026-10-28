@@ -262,97 +262,112 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-7.5rem)] gap-4">
+  <div class="mx-auto flex h-[calc(100vh-7rem)] w-full max-w-[1440px] gap-3">
     <!-- 文档树 -->
-    <aside class="hidden w-64 shrink-0 flex-col rounded-[var(--radius-card)] border border-neutral-200 bg-white shadow-[var(--shadow-card)] md:flex dark:border-neutral-800 dark:bg-neutral-900">
-      <div class="flex items-center gap-1 border-b border-neutral-200 px-3 py-2.5 dark:border-neutral-800">
+    <aside
+      class="hidden w-[264px] shrink-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-card)] md:flex"
+    >
+      <div class="flex items-center gap-1 border-b border-[var(--border)] px-2 py-2">
         <select
           v-model="spaceId"
-          class="w-full rounded-[var(--radius-field)] border border-neutral-200 bg-transparent px-2 py-1.5 text-sm font-medium outline-none dark:border-neutral-700"
+          class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[13px] font-medium text-[var(--text-strong)] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
           @change="switchSpace"
         >
           <option v-for="space in spaces" :key="space.id" :value="space.id">{{ space.name }}</option>
         </select>
         <button
-          class="shrink-0 rounded p-1.5 text-neutral-400 transition hover:bg-danger-50 hover:text-danger-500 dark:hover:bg-danger-500/10"
+          class="shrink-0 rounded-[var(--radius-field)] p-1.5 text-neutral-400 transition hover:bg-danger-50 hover:text-danger-500 dark:hover:bg-danger-500/10"
           title="删除知识库"
           @click="removeSpace"
         >
           <AppIcon name="logout" class="size-4" />
         </button>
       </div>
-      <div class="px-3 py-2">
+
+      <div class="px-2 py-2">
         <div class="relative">
-          <AppIcon name="search" class="absolute top-2 left-2 size-4 text-neutral-400" />
+          <AppIcon name="search" class="pointer-events-none absolute top-2 left-2 size-4 text-neutral-400" />
           <input
             v-model="keyword"
             placeholder="搜索文档"
-            class="h-8 w-full rounded-[var(--radius-field)] border border-neutral-200 bg-transparent pr-2 pl-7 text-xs outline-none focus:border-primary-400 dark:border-neutral-700"
+            class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface-muted)] pr-2 pl-7 text-[12px] outline-none focus:border-primary-500 focus:bg-[var(--surface)] focus:ring-2 focus:ring-primary-500/20"
           />
         </div>
       </div>
-      <div class="flex-1 overflow-y-auto px-2 pb-2">
+
+      <div class="flex-1 overflow-y-auto px-1.5 pb-2">
         <button
           v-for="row in flatTree"
           :key="row.node.id"
-          class="group flex w-full items-center gap-1.5 rounded-[var(--radius-field)] px-2 py-1.5 text-left text-sm transition"
+          class="group flex h-7 w-full items-center gap-1.5 rounded-[var(--radius-field)] pr-1.5 text-left text-[12.5px] transition-colors"
           :class="
             current?.id === row.node.id
-              ? 'bg-primary-50 font-medium text-primary-700 dark:bg-primary-900/40 dark:text-primary-200'
-              : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+              ? 'bg-[var(--surface-hover)] font-medium text-[var(--text-strong)]'
+              : 'text-neutral-600 hover:bg-[var(--surface-hover)] dark:text-neutral-300'
           "
-          :style="{ paddingLeft: `${row.depth * 14 + 8}px` }"
+          :style="{ paddingLeft: `${row.depth * 12 + 6}px` }"
           @click="openPage(row.node)"
         >
-          <AppIcon :name="row.node.kind === 'folder' ? 'folder' : 'doc'" class="size-4 shrink-0 opacity-70" />
+          <AppIcon
+            :name="row.node.kind === 'folder' ? 'folder' : 'doc'"
+            class="size-3.5 shrink-0"
+            :class="current?.id === row.node.id ? 'text-primary-600' : 'opacity-60'"
+          />
           <span class="min-w-0 flex-1 truncate">{{ row.node.title }}</span>
-          <button
+          <span
             class="hidden rounded p-0.5 text-neutral-400 hover:text-primary-600 group-hover:block"
+            role="button"
             aria-label="在此新建"
             @click.stop="createParent = row.node.id; createOpen = true"
           >
-            <AppIcon name="plus" class="size-3.5" />
-          </button>
+            <AppIcon name="plus" class="size-3" />
+          </span>
         </button>
-        <p v-if="flatTree.length === 0" class="py-6 text-center text-xs text-neutral-400">暂无文档</p>
+        <p v-if="flatTree.length === 0" class="py-8 text-center text-[11px] text-neutral-400">暂无文档</p>
       </div>
-      <div class="border-t border-neutral-200 p-2 dark:border-neutral-800">
+
+      <div class="border-t border-[var(--border)] p-2">
         <Button size="sm" variant="secondary" block @click="createParent = ''; createOpen = true">
-          <AppIcon name="plus" class="size-4" /> 新建
+          <AppIcon name="plus" class="size-3.5" /> 新建
         </Button>
       </div>
     </aside>
 
     <!-- 正文 -->
-    <section class="flex min-w-0 flex-1 flex-col rounded-[var(--radius-card)] border border-neutral-200 bg-white shadow-[var(--shadow-card)] dark:border-neutral-800 dark:bg-neutral-900">
+    <section
+      class="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-card)]"
+    >
       <template v-if="current">
-        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 px-5 py-3 dark:border-neutral-800">
-          <nav class="flex min-w-0 items-center gap-1 text-xs text-neutral-400">
+        <div class="flex h-11 items-center justify-between gap-2 border-b border-[var(--border)] px-3">
+          <nav class="flex min-w-0 items-center gap-1 text-[11px] text-neutral-400">
             <template v-for="(crumb, index) in breadcrumb" :key="crumb.id">
               <span v-if="index > 0" class="text-neutral-300">/</span>
-              <span class="max-w-40 truncate" :class="index === breadcrumb.length - 1 ? 'text-neutral-600 dark:text-neutral-300' : ''">
+              <span
+                class="max-w-40 truncate"
+                :class="index === breadcrumb.length - 1 ? 'text-[var(--text-strong)]' : ''"
+              >
                 {{ crumb.title }}
               </span>
             </template>
           </nav>
-          <div class="flex items-center gap-2">
-            <span v-if="dirty" class="text-xs text-warning-700">未保存</span>
-            <span v-else-if="savedTip" class="text-xs text-success-700">{{ savedTip }}</span>
+          <div class="flex shrink-0 items-center gap-1">
+            <span v-if="dirty" class="mr-1 text-[11px] text-warning-700">未保存</span>
+            <span v-else-if="savedTip" class="mr-1 text-[11px] text-success-700">{{ savedTip }}</span>
             <button
-              class="rounded-[var(--radius-field)] p-1.5 text-neutral-400 transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              :class="outlineOpen ? 'text-primary-600' : ''"
+              class="rounded-[var(--radius-field)] p-1 transition hover:bg-[var(--surface-hover)]"
+              :class="outlineOpen ? 'text-primary-600' : 'text-neutral-400'"
               aria-label="大纲"
               @click="outlineOpen = !outlineOpen"
             >
-              <AppIcon name="menu" class="size-4.5" />
+              <AppIcon name="menu" class="size-4" />
             </button>
             <button
-              class="rounded-[var(--radius-field)] p-1.5 text-neutral-400 transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              :class="historyOpen ? 'text-primary-600' : ''"
+              class="rounded-[var(--radius-field)] p-1 transition hover:bg-[var(--surface-hover)]"
+              :class="historyOpen ? 'text-primary-600' : 'text-neutral-400'"
               aria-label="历史版本"
               @click="historyOpen = !historyOpen"
             >
-              <AppIcon name="settings" class="size-4.5" />
+              <AppIcon name="settings" class="size-4" />
             </button>
             <template v-if="editing">
               <Button size="sm" variant="secondary" @click="cancelEdit">取消</Button>
@@ -362,15 +377,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           </div>
         </div>
 
-        <p v-if="errorMessage" class="px-6 pt-3 text-sm text-danger-500">{{ errorMessage }}</p>
+        <p v-if="errorMessage" class="px-6 pt-3 text-[12px] text-danger-500">{{ errorMessage }}</p>
 
         <div class="flex min-h-0 flex-1">
           <div class="min-w-0 flex-1 overflow-y-auto">
-            <div class="mx-auto max-w-3xl px-8 py-8">
-              <h1 class="text-3xl font-bold tracking-tight">{{ current.title }}</h1>
-              <p class="mt-2 mb-6 text-xs text-neutral-400">
-                v{{ current.version }} · Ctrl/Cmd + S 保存
-              </p>
+            <div class="mx-auto max-w-[760px] px-8 py-8">
+              <h1 class="text-[26px] leading-tight font-semibold tracking-[-0.02em] text-[var(--text-strong)]">
+                {{ current.title }}
+              </h1>
+              <p class="mt-1.5 mb-6 text-[11px] text-neutral-400">v{{ current.version }} · Ctrl/Cmd + S 保存</p>
               <div ref="editorRoot">
                 <MarkdownEditor
                   :key="`${current.id}-${editing ? 'edit' : 'view'}`"
@@ -380,12 +395,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   @update:model-value="draft = $event"
                 />
               </div>
-              <details v-if="editing" class="mt-6 text-xs text-neutral-400">
+              <details v-if="editing" class="mt-6 text-[11px] text-neutral-400">
                 <summary class="cursor-pointer">纯文本回退</summary>
                 <textarea
                   v-model="draft"
                   rows="10"
-                  class="mt-2 w-full rounded-[var(--radius-field)] border border-neutral-200 p-3 font-mono text-sm outline-none focus:border-primary-400 dark:border-neutral-700"
+                  class="mt-2 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] p-3 font-mono text-[12px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
                 />
               </details>
             </div>
@@ -394,52 +409,64 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <!-- 大纲 / 历史 -->
           <aside
             v-if="outlineOpen || historyOpen"
-            class="hidden w-60 shrink-0 overflow-y-auto border-l border-neutral-200 px-4 py-5 lg:block dark:border-neutral-800"
+            class="hidden w-[224px] shrink-0 overflow-y-auto border-l border-[var(--border)] px-3 py-4 lg:block"
           >
             <template v-if="outlineOpen">
-              <h2 class="mb-2 text-xs font-semibold text-neutral-400">大纲</h2>
+              <h2 class="mb-1.5 text-[10px] font-medium tracking-[0.12em] text-neutral-400 uppercase">大纲</h2>
               <button
                 v-for="(item, index) in outline"
                 :key="`${index}-${item.text}`"
-                class="block w-full truncate rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-neutral-100 hover:text-primary-600 dark:hover:bg-neutral-800"
+                class="block w-full truncate rounded-[var(--radius-field)] px-1.5 py-1 text-left text-[12px] text-neutral-500 transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-strong)]"
                 :style="{ paddingLeft: `${(item.level - 1) * 10 + 6}px` }"
                 @click="jumpToHeading(index)"
               >
                 {{ item.text }}
               </button>
-              <p v-if="outline.length === 0" class="text-xs text-neutral-300">暂无标题</p>
+              <p v-if="outline.length === 0" class="text-[11px] text-neutral-400">暂无标题</p>
             </template>
+
             <template v-if="historyOpen">
-              <h2 class="mt-6 mb-2 text-xs font-semibold text-neutral-400">操作记录</h2>
-              <div v-for="change in changes" :key="change.id" class="flex items-center justify-between py-1 text-xs">
-                <span class="text-neutral-500">
+              <h2 class="mt-5 mb-1.5 text-[10px] font-medium tracking-[0.12em] text-neutral-400 uppercase">
+                操作记录
+              </h2>
+              <div
+                v-for="change in changes"
+                :key="change.id"
+                class="flex items-center justify-between gap-2 py-1 text-[11px]"
+              >
+                <span class="min-w-0 truncate text-neutral-500">
                   {{ change.action === 'update' ? '正文更新' : change.action === 'undo' ? '撤销' : change.action }}
                   · {{ new Date(change.createdAt).toLocaleString('zh-CN') }}
                 </span>
-                <button class="text-primary-600 hover:underline" @click="undoChange(change)">撤销</button>
+                <button class="shrink-0 text-primary-600 hover:underline" @click="undoChange(change)">撤销</button>
               </div>
-              <p v-if="changes.length === 0" class="text-xs text-neutral-300">暂无记录</p>
-              <h2 class="mt-6 mb-2 text-xs font-semibold text-neutral-400">历史版本</h2>
+              <p v-if="changes.length === 0" class="text-[11px] text-neutral-400">暂无记录</p>
+
+              <h2 class="mt-5 mb-1.5 text-[10px] font-medium tracking-[0.12em] text-neutral-400 uppercase">
+                历史版本
+              </h2>
               <div
                 v-for="item in versions"
                 :key="item.version"
-                class="flex items-center justify-between py-1 text-xs"
+                class="flex items-center justify-between gap-2 py-1 text-[11px]"
               >
                 <span class="text-neutral-500">
                   v{{ item.version }} · {{ new Date(item.createdAt).toLocaleDateString('zh-CN') }}
                 </span>
-                <button class="text-primary-600 hover:underline" @click="restore(item.version)">回滚</button>
+                <button class="shrink-0 text-primary-600 hover:underline" @click="restore(item.version)">回滚</button>
               </div>
             </template>
           </aside>
         </div>
       </template>
 
-      <div v-else class="flex flex-1 flex-col items-center justify-center gap-3 text-neutral-400">
-        <span class="flex size-14 items-center justify-center rounded-2xl bg-neutral-100 dark:bg-neutral-800">
-          <AppIcon name="doc" class="size-7" />
+      <div v-else class="flex flex-1 flex-col items-center justify-center gap-3">
+        <span
+          class="flex size-12 items-center justify-center rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface-muted)] text-neutral-400"
+        >
+          <AppIcon name="doc" class="size-6" />
         </span>
-        <p class="text-sm">从左侧选择文档，或新建一篇开始写作</p>
+        <p class="text-[13px] text-neutral-500">从左侧选择文档，或新建一篇开始写作</p>
         <Button size="sm" variant="secondary" @click="createParent = ''; createOpen = true">新建文档</Button>
       </div>
     </section>
@@ -447,15 +474,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     <!-- 新建 -->
     <AppModal :open="createOpen" title="新建" @close="createOpen = false">
       <div class="space-y-3">
-        <div class="flex gap-2">
+        <div class="grid grid-cols-2 gap-1 rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface-muted)] p-1">
           <button
             v-for="option in [{ value: 'page', label: '文档' }, { value: 'folder', label: '文件夹' }]"
             :key="option.value"
-            class="flex-1 rounded-[var(--radius-field)] border px-3 py-2 text-sm transition"
+            class="rounded-[calc(var(--radius-field)-2px)] px-3 py-1.5 text-[12px] font-medium transition"
             :class="
               createKind === option.value
-                ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/40'
-                : 'border-neutral-200 text-neutral-500 hover:border-primary-300 dark:border-neutral-700'
+                ? 'bg-[var(--surface)] text-[var(--text-strong)] shadow-[var(--shadow-card)]'
+                : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200'
             "
             @click="createKind = option.value as 'page' | 'folder'"
           >
@@ -465,14 +492,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         <input
           v-model="createTitle"
           placeholder="标题"
-          class="h-10 w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 text-sm outline-none focus:border-primary-500 dark:border-neutral-700"
+          class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 text-[13px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
           @keyup.enter="createNode"
         />
-        <label class="block text-sm">
-          <span class="mb-1 block text-xs text-neutral-500">所属文件夹（可选）</span>
+        <label class="block">
+          <span class="mb-1 block text-[11px] font-medium text-neutral-500">所属文件夹（可选）</span>
           <select
             v-model="createParent"
-            class="w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700"
+            class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 text-[13px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
           >
             <option value="">根目录</option>
             <option v-for="folder in folders" :key="folder.id" :value="folder.id">{{ folder.label }}</option>
