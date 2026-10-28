@@ -80,32 +80,32 @@ onMounted(() => load())
 
 <template>
   <div class="w-full max-w-md">
-    <div class="rounded-[var(--radius-card)] border border-neutral-200 bg-white p-6 shadow-[var(--shadow-card)] dark:border-neutral-800 dark:bg-neutral-900">
+    <div class="rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-card)]">
       <div class="mb-4 flex items-center gap-3">
         <span class="flex size-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-900/40">
           <AppIcon name="folder" class="size-6" />
         </span>
         <div class="min-w-0">
           <h1 class="truncate text-base font-semibold">{{ info?.name ?? '文件分享' }}</h1>
-          <p v-if="info" class="text-xs text-neutral-400">
+          <p v-if="info" class="text-[11.5px] text-neutral-400">
             {{ formatSize(info.size) }} · 已下载 {{ info.downloadCount }} 次
             <span v-if="info.maxDownloads > 0"> / 限 {{ info.maxDownloads }} 次</span>
           </p>
         </div>
       </div>
 
-      <p v-if="errorMessage" class="mb-3 text-sm text-danger-500">{{ errorMessage }}</p>
+      <p v-if="errorMessage" class="mb-3 text-[13px] text-danger-500">{{ errorMessage }}</p>
 
       <form v-if="needPassword" class="space-y-3" @submit.prevent="load(true)">
         <input
           v-model="password"
           type="password"
           placeholder="请输入访问密码"
-          class="h-10 w-full rounded-[var(--radius-field)] border border-neutral-300 bg-transparent px-3 text-sm outline-none focus:border-primary-500 dark:border-neutral-700"
+          class="h-10 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-transparent px-3 text-[13px] outline-none focus:border-primary-500"
         />
         <button
           type="submit"
-          class="h-10 w-full rounded-[var(--radius-field)] bg-primary-600 text-sm font-medium text-white transition hover:bg-primary-700 disabled:opacity-60"
+          class="h-10 w-full rounded-[var(--radius-field)] bg-primary-600 text-[13px] font-medium text-white transition hover:bg-primary-700 disabled:opacity-60"
           :disabled="loading"
         >
           {{ loading ? '验证中…' : '验证并查看' }}
@@ -114,13 +114,13 @@ onMounted(() => load())
 
       <button
         v-else-if="info"
-        class="h-10 w-full rounded-[var(--radius-field)] bg-primary-600 text-sm font-medium text-white transition hover:bg-primary-700"
+        class="h-10 w-full rounded-[var(--radius-field)] bg-primary-600 text-[13px] font-medium text-white transition hover:bg-primary-700"
         @click="download"
       >
         下载文件
       </button>
     </div>
-    <p class="mt-4 text-center text-xs text-neutral-400">
+    <p class="mt-4 text-center text-[11.5px] text-neutral-400">
       {{ $config.public.appName }} · 文件分享
     </p>
   </div>

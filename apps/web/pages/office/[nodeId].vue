@@ -51,7 +51,7 @@ onMounted(async () => {
       <h1 class="text-xl font-semibold">Office 预览</h1>
       <Button variant="ghost" size="sm" @click="$router.back()">返回</Button>
     </div>
-    <Card v-if="errorMessage" class="text-sm text-danger-500">{{ errorMessage }}</Card>
-    <div v-show="!errorMessage" :id="containerId" class="h-[calc(100vh-11rem)] w-full overflow-hidden rounded-[var(--radius-card)] border border-neutral-200" />
+    <Card v-if="errorMessage" class="text-[13px] text-danger-500">{{ errorMessage }}</Card>
+    <div v-show="!errorMessage" :id="containerId" class="h-[calc(100vh-11rem)] w-full overflow-hidden rounded-[var(--radius-card)] border border-[var(--border)]" />
   </div>
 </template>

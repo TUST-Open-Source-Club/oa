@@ -120,18 +120,18 @@ async function queryStatus() {
     <template v-if="event && !result">
       <div>
         <h1 class="text-lg font-semibold">{{ event.title }}</h1>
-        <p v-if="event.location" class="mt-1 text-sm text-neutral-500">地点：{{ event.location }}</p>
-        <p class="mt-1 text-xs text-neutral-400">
+        <p v-if="event.location" class="mt-1 text-[13px] text-neutral-500">地点：{{ event.location }}</p>
+        <p class="mt-1 text-[11.5px] text-neutral-400">
           剩余名额：{{ event.remaining === null || event.remaining > 0 ? `${event.remaining ?? '不限'}` : '已满' }}
           <span v-if="event.needReview"> · 需审核</span>
         </p>
       </div>
-      <p v-if="event.descriptionMd" class="whitespace-pre-line text-sm text-neutral-600">{{ event.descriptionMd }}</p>
+      <p v-if="event.descriptionMd" class="whitespace-pre-line text-[13px] text-neutral-600">{{ event.descriptionMd }}</p>
 
       <form class="space-y-3" @submit.prevent="submit">
         <template v-for="field in event.form.fields" :key="field.key">
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">
+            <span class="mb-1 block text-[13px] font-medium text-neutral-700">
               {{ field.label }}<span v-if="field.required" class="text-danger-500"> *</span>
             </span>
             <textarea
@@ -139,19 +139,19 @@ async function queryStatus() {
               :value="answers[field.key] as string"
               @input="answers[field.key] = ($event.target as HTMLTextAreaElement).value"
               rows="3"
-              class="w-full rounded-[var(--radius-field)] border border-neutral-300 p-2 text-sm"
+              class="w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] p-2 text-[13px]"
             />
             <select
               v-else-if="field.type === 'select' || field.type === 'radio'"
               :value="answers[field.key] as string"
               @change="answers[field.key] = ($event.target as HTMLSelectElement).value"
-              class="w-full rounded-[var(--radius-field)] border border-neutral-300 p-2 text-sm"
+              class="w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] p-2 text-[13px]"
             >
               <option value="">请选择</option>
               <option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
             <div v-else-if="field.type === 'multiselect'" class="space-y-1">
-              <label v-for="option in field.options" :key="option.value" class="flex items-center gap-2 text-sm">
+              <label v-for="option in field.options" :key="option.value" class="flex items-center gap-2 text-[13px]">
                 <input
                   type="checkbox"
                   :value="option.value"
@@ -165,7 +165,7 @@ async function queryStatus() {
                 {{ option.label }}
               </label>
             </div>
-            <label v-else-if="field.type === 'checkbox'" class="flex items-center gap-2 text-sm">
+            <label v-else-if="field.type === 'checkbox'" class="flex items-center gap-2 text-[13px]">
               <input
                 type="checkbox"
                 :checked="answers[field.key] as boolean"
@@ -178,7 +178,7 @@ async function queryStatus() {
               :value="answers[field.key] as string"
               @input="answers[field.key] = ($event.target as HTMLInputElement).value"
               :type="field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : field.type === 'email' ? 'email' : 'text'"
-              class="w-full rounded-[var(--radius-field)] border border-neutral-300 p-2 text-sm"
+              class="w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] p-2 text-[13px]"
             />
           </label>
         </template>
@@ -187,35 +187,35 @@ async function queryStatus() {
           <Input v-model="code" label="邮箱验证码" placeholder="6 位数字" class="flex-1" />
           <Button type="button" variant="secondary" :loading="sending" @click="sendCode">发送验证码</Button>
         </div>
-        <p v-if="devCode" class="text-xs text-neutral-400">开发模式验证码：{{ devCode }}</p>
+        <p v-if="devCode" class="text-[11.5px] text-neutral-400">开发模式验证码：{{ devCode }}</p>
 
-        <p v-if="errorMessage" role="alert" class="text-sm text-danger-500">{{ errorMessage }}</p>
+        <p v-if="errorMessage" role="alert" class="text-[13px] text-danger-500">{{ errorMessage }}</p>
         <Button type="submit" block :loading="submitting">提交报名</Button>
       </form>
     </template>
 
     <template v-else-if="result">
       <h1 class="text-lg font-semibold">报名已提交</h1>
-      <p class="text-sm text-neutral-600">状态：{{ result.status === 'approved' ? '已通过' : result.status === 'pending' ? '待审核' : '候补中' }}</p>
-      <p class="text-sm text-neutral-600">签到码：<code class="rounded bg-neutral-100 px-2 py-0.5">{{ result.checkinCode }}</code></p>
-      <p class="text-xs text-neutral-400">请保存签到码，现场出示用于签到。</p>
+      <p class="text-[13px] text-neutral-600">状态：{{ result.status === 'approved' ? '已通过' : result.status === 'pending' ? '待审核' : '候补中' }}</p>
+      <p class="text-[13px] text-neutral-600">签到码：<code class="rounded bg-neutral-100 px-2 py-0.5">{{ result.checkinCode }}</code></p>
+      <p class="text-[11.5px] text-neutral-400">请保存签到码，现场出示用于签到。</p>
       <Button variant="secondary" @click="result = null">返回</Button>
     </template>
 
     <template v-else>
-      <p class="text-sm text-danger-500">{{ errorMessage || '加载中…' }}</p>
+      <p class="text-[13px] text-danger-500">{{ errorMessage || '加载中…' }}</p>
     </template>
 
-    <details class="border-t border-neutral-100 pt-3 text-sm">
+    <details class="border-t border-neutral-100 pt-3 text-[13px]">
       <summary class="cursor-pointer text-neutral-500">查询报名状态</summary>
       <div class="mt-2 space-y-2">
         <Input v-model="query.code" placeholder="签到码" />
         <Input v-model="query.email" placeholder="报名邮箱" />
         <Button size="sm" variant="secondary" @click="queryStatus">查询</Button>
-        <p v-if="queryResult" class="text-sm text-neutral-600">
+        <p v-if="queryResult" class="text-[13px] text-neutral-600">
           {{ queryResult.statusLabel }}{{ queryResult.checkedIn ? ' · 已签到' : '' }}
         </p>
-        <p v-if="queryError" class="text-sm text-danger-500">{{ queryError }}</p>
+        <p v-if="queryError" class="text-[13px] text-danger-500">{{ queryError }}</p>
       </div>
     </details>
   </Card>
