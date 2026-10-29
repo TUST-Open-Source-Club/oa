@@ -12,7 +12,7 @@
 
 ## P1 · 协作
 
-- [ ] 评论：块级锚点、回复、解决/未解决，`@` 接 notify
+- [x] 评论：块级锚点（按标题）、回复、解决/未解决；`@` 接 notify 待补
 - [ ] 版本 diff（任选两版）+ 恢复
 - [ ] 关注文档 → 正文变更通知（走 notify 偏好）
 - [ ] 权限细化：空间角色 owner/admin/editor/reader + 文档级覆盖
@@ -44,8 +44,8 @@ GET    /public/{token}                        ✅
 GET    /search?q=                        ✅
 GET    /spaces/{id}/nodes/{node_id}/export?format=md|html  ✅
 POST   /spaces/{id}/import                                  ✅
-GET/POST /spaces/{id}/nodes/{node_id}/comments
-PATCH  /comments/{id}
+GET/POST /spaces/{id}/nodes/{node_id}/comments   ✅
+PATCH  /comments/{comment_id}                     ✅
 POST   /spaces/{id}/nodes/{node_id}/star
 GET    /stars
 ```
@@ -133,3 +133,24 @@ viewer 自动排除 `private`，已删除不出现，按更新时间倒序，返
 截图：`docs/ui-preview/docs-export-import.png`。
 
 **P0 全部完成。** 下一步进入 P1：块级评论（回复 / 解决，`@` 接 notify）、版本 diff、关注通知、权限细化。
+
+## 已完成（P1 第 1 项 · 块级评论）
+
+迁移 v6：`node_comments(id, space_id, node_id, parent_id, author_id, anchor jsonb, body, resolved_at, created_at)`，
+索引 `(node_id, created_at)` 与 `(parent_id)`。
+
+接口：
+- `GET .../comments`：成员可读，按时间正序；
+- `POST .../comments`：`{ body, parentId?, anchor? }`，正文 1~4000 字，
+  只支持一级回复（回复的回复 422），父评论必须同文档（跨文档 422），
+  `anchor` 形如 `{ "heading": "时间安排" }`（当前按标题锚定块）；
+- `PATCH .../comments/{id}`：`{ resolved }`，仅评论作者或空间编辑者；
+- `DELETE .../comments/{id}`：同上权限，删除父评论级联删除回复。
+
+前端：文档顶栏评论按钮（未解决数徽标）+ 右侧评论抽屉（线程、回复、解决/重开、删除、输入框）；
+大纲每一项 hover 出现评论按钮，可就该标题锚定评论。
+
+测试：`services/doc/tests/comments_flow.rs` 3 条。
+截图：`docs/ui-preview/docs-comments.png`。
+
+**待补**：评论 `@` 提及接 notify（需要用户目录或 `@username` 解析）——放到「关注通知」一起做。

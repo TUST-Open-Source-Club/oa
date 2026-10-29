@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use club_common::{new_id, AppError};
 
-use crate::entity::{node, space, space_member, version};
+use crate::entity::{node, node_comment, space, space_member, version};
 
 /// 数据库错误 → 统一错误。
 pub fn map_db_err(err: DbErr) -> AppError {
@@ -640,4 +640,89 @@ pub async fn create_page_with_content(
     .insert(db)
     .await
     .map_err(map_db_err)
+}
+
+/// 新建评论。
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_comment(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    node_id: Uuid,
+    parent_id: Option<Uuid>,
+    author_id: Uuid,
+    anchor: Option<serde_json::Value>,
+    body: &str,
+    now: DateTime<Utc>,
+) -> Result<node_comment::Model, AppError> {
+    node_comment::ActiveModel {
+        id: Set(new_id()),
+        space_id: Set(space_id),
+        node_id: Set(node_id),
+        parent_id: Set(parent_id),
+        author_id: Set(author_id),
+        anchor: Set(anchor),
+        body: Set(body.to_string()),
+        resolved_at: Set(None),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}
+
+/// 列出某页面的评论（按时间正序）。
+pub async fn list_comments(
+    db: &DatabaseConnection,
+    node_id: Uuid,
+) -> Result<Vec<node_comment::Model>, AppError> {
+    node_comment::Entity::find()
+        .filter(node_comment::Column::NodeId.eq(node_id))
+        .order_by_asc(node_comment::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 按 ID 查评论。
+pub async fn find_comment(
+    db: &DatabaseConnection,
+    comment_id: Uuid,
+) -> Result<Option<node_comment::Model>, AppError> {
+    node_comment::Entity::find_by_id(comment_id)
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 设置评论解决状态。
+pub async fn set_comment_resolved(
+    db: &DatabaseConnection,
+    comment: &node_comment::Model,
+    resolved: bool,
+    now: DateTime<Utc>,
+) -> Result<node_comment::Model, AppError> {
+    let mut active: node_comment::ActiveModel = comment.clone().into();
+    active.resolved_at = Set(if resolved {
+        Some(now.fixed_offset())
+    } else {
+        None
+    });
+    active.update(db).await.map_err(map_db_err)
+}
+
+/// 删除评论及其一级回复。
+pub async fn delete_comment_tree(
+    db: &DatabaseConnection,
+    comment_id: Uuid,
+) -> Result<u64, AppError> {
+    node_comment::Entity::delete_many()
+        .filter(node_comment::Column::ParentId.eq(comment_id))
+        .exec(db)
+        .await
+        .map_err(map_db_err)?;
+    let result = node_comment::Entity::delete_by_id(comment_id)
+        .exec(db)
+        .await
+        .map_err(map_db_err)?;
+    Ok(result.rows_affected)
 }

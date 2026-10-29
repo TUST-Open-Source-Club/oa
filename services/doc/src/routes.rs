@@ -468,6 +468,200 @@ pub async fn download_file(
         .into_response())
 }
 
+/// 评论 DTO。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentDto {
+    /// ID。
+    pub id: String,
+    /// 父评论。
+    pub parent_id: Option<String>,
+    /// 作者。
+    pub author_id: String,
+    /// 锚点。
+    pub anchor: Option<Value>,
+    /// 正文。
+    pub body: String,
+    /// 解决时间。
+    pub resolved_at: Option<DateTime<FixedOffset>>,
+    /// 创建时间。
+    pub created_at: DateTime<FixedOffset>,
+}
+
+impl From<&crate::entity::node_comment::Model> for CommentDto {
+    fn from(model: &crate::entity::node_comment::Model) -> Self {
+        Self {
+            id: model.id.to_string(),
+            parent_id: model.parent_id.map(|id| id.to_string()),
+            author_id: model.author_id.to_string(),
+            anchor: model.anchor.clone(),
+            body: model.body.clone(),
+            resolved_at: model.resolved_at.map(|value| value.fixed_offset()),
+            created_at: model.created_at,
+        }
+    }
+}
+
+/// `GET /spaces/{id}/nodes/{node_id}/comments`：评论列表。
+pub async fn list_comments(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Vec<CommentDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, space_id, user_id).await?;
+    load_node(&state, space_id, node_id).await?;
+    let comments = repo::list_comments(&state.db, node_id).await?;
+    Ok(Json(comments.iter().map(CommentDto::from).collect()))
+}
+
+/// 新建评论请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCommentRequest {
+    /// 正文。
+    pub body: String,
+    /// 回复的父评论。
+    pub parent_id: Option<Uuid>,
+    /// 锚点（`{ heading }`）。
+    pub anchor: Option<Value>,
+}
+
+/// `POST /spaces/{id}/nodes/{node_id}/comments`：发表评论/回复。
+pub async fn create_comment(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+    Json(input): Json<CreateCommentRequest>,
+) -> Result<(StatusCode, Json<CommentDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, space_id, user_id).await?;
+    load_node(&state, space_id, node_id).await?;
+    let body = input.body.trim();
+    if body.is_empty() || body.chars().count() > 4000 {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "评论正文不合法",
+            vec![FieldError::new("body", "不能为空，且不超过 4000 字")],
+        ));
+    }
+    if let Some(anchor) = &input.anchor {
+        match anchor.get("heading").and_then(Value::as_str) {
+            Some(heading) if !heading.trim().is_empty() && heading.chars().count() <= 120 => {}
+            _ => {
+                return Err(AppError::unprocessable(
+                    "DOC_VALIDATION",
+                    "锚点不合法",
+                    vec![FieldError::new("anchor", "需包含 heading")],
+                ))
+            }
+        }
+    }
+    if let Some(parent_id) = input.parent_id {
+        let parent = repo::find_comment(&state.db, parent_id)
+            .await?
+            .ok_or_else(|| AppError::not_found("DOC_COMMENT_NOT_FOUND", "父评论不存在"))?;
+        if parent.node_id != node_id {
+            return Err(AppError::unprocessable(
+                "DOC_VALIDATION",
+                "只能回复同一文档下的评论",
+                vec![FieldError::new("parentId", "评论不在该文档")],
+            ));
+        }
+        if parent.parent_id.is_some() {
+            return Err(AppError::unprocessable(
+                "DOC_VALIDATION",
+                "只支持一级回复",
+                vec![FieldError::new("parentId", "不能回复回复")],
+            ));
+        }
+    }
+    let model = repo::insert_comment(
+        &state.db,
+        space_id,
+        node_id,
+        input.parent_id,
+        user_id,
+        input.anchor,
+        body,
+        state.now(),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(CommentDto::from(&model))))
+}
+
+/// 更新评论请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCommentRequest {
+    /// 是否已解决。
+    pub resolved: bool,
+}
+
+/// 校验评论操作权限：作者或空间编辑者。
+async fn ensure_comment_operator(
+    state: &SharedState,
+    space_id: Uuid,
+    user_id: Uuid,
+    comment: &crate::entity::node_comment::Model,
+) -> Result<(), AppError> {
+    if comment.author_id == user_id {
+        return Ok(());
+    }
+    let member = repo::ensure_member(&state.db, space_id, user_id).await?;
+    if matches!(member.role.as_str(), "admin" | "editor") {
+        Ok(())
+    } else {
+        Err(AppError::forbidden(
+            "DOC_FORBIDDEN",
+            "只有评论作者或编辑者可以操作",
+        ))
+    }
+}
+
+/// 重载评论并校验归属。
+async fn load_comment(
+    state: &SharedState,
+    space_id: Uuid,
+    node_id: Uuid,
+    comment_id: Uuid,
+) -> Result<crate::entity::node_comment::Model, AppError> {
+    repo::find_comment(&state.db, comment_id)
+        .await?
+        .filter(|comment| comment.space_id == space_id && comment.node_id == node_id)
+        .ok_or_else(|| AppError::not_found("DOC_COMMENT_NOT_FOUND", "评论不存在"))
+}
+
+/// `PATCH /spaces/{id}/nodes/{node_id}/comments/{comment_id}`：解决/取消解决。
+pub async fn update_comment(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id, comment_id)): Path<(Uuid, Uuid, Uuid)>,
+    Json(input): Json<UpdateCommentRequest>,
+) -> Result<Json<CommentDto>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, space_id, user_id).await?;
+    let comment = load_comment(&state, space_id, node_id, comment_id).await?;
+    ensure_comment_operator(&state, space_id, user_id, &comment).await?;
+    let updated =
+        repo::set_comment_resolved(&state.db, &comment, input.resolved, state.now()).await?;
+    Ok(Json(CommentDto::from(&updated)))
+}
+
+/// `DELETE /spaces/{id}/nodes/{node_id}/comments/{comment_id}`：删除评论（级联回复）。
+pub async fn delete_comment(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id, comment_id)): Path<(Uuid, Uuid, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, space_id, user_id).await?;
+    let comment = load_comment(&state, space_id, node_id, comment_id).await?;
+    ensure_comment_operator(&state, space_id, user_id, &comment).await?;
+    repo::delete_comment_tree(&state.db, comment_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// 导出查询参数。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1142,6 +1336,14 @@ pub fn router() -> Router<SharedState> {
         .route("/search", get(search_docs))
         .route("/spaces/{id}/nodes/{node_id}/export", get(export_node))
         .route("/spaces/{id}/import", post(import_markdown))
+        .route(
+            "/spaces/{id}/nodes/{node_id}/comments",
+            get(list_comments).post(create_comment),
+        )
+        .route(
+            "/spaces/{id}/nodes/{node_id}/comments/{comment_id}",
+            axum::routing::patch(update_comment).delete(delete_comment),
+        )
         .route("/uploads", post(upload_file))
         .route("/files/{id}", get(download_file))
 }

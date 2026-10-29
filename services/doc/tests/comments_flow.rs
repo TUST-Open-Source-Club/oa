@@ -109,7 +109,14 @@ async fn create_list_and_reply_comments() {
     let space_id = create_space(&app, &owner_token).await;
     add_member(&app, &space_id, member, "viewer").await;
     let page = create_page(&app, &owner_token, &space_id, "评审文档").await;
-    write_content(&app, &owner_token, &space_id, &page, "# 方案\n\n## 时间安排\n").await;
+    write_content(
+        &app,
+        &owner_token,
+        &space_id,
+        &page,
+        "# 方案\n\n## 时间安排\n",
+    )
+    .await;
 
     let created = add_comment(
         &app,

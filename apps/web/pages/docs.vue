@@ -23,6 +23,15 @@ interface NodeDetail {
   contentMd: string
   visibility?: string
 }
+interface CommentItem {
+  id: string
+  parentId: string | null
+  authorId: string
+  anchor: { heading?: string } | null
+  body: string
+  resolvedAt: string | null
+  createdAt: string
+}
 interface SearchHit {
   id: string
   spaceId: string
@@ -74,6 +83,14 @@ const renameTarget = ref<NodeItem | null>(null)
 const moveOpen = ref(false)
 const moveTarget = ref<NodeItem | null>(null)
 const moveParent = ref('')
+
+const commentsOpen = ref(false)
+const comments = ref<CommentItem[]>([])
+const commentsLoading = ref(false)
+const commentBody = ref('')
+const commentAnchor = ref('')
+const replyTo = ref<CommentItem | null>(null)
+const commentUsers = ref<Record<string, { nickname: string }>>({})
 
 const moreOpen = ref(false)
 const importInputEl = ref<HTMLInputElement | null>(null)
@@ -148,6 +165,7 @@ async function openPage(node: NodeItem) {
   editing.value = false
   versions.value = await api<VersionItem[]>(`spaces/${spaceId.value}/nodes/${node.id}/versions`)
   await loadChanges(node.id)
+  if (commentsOpen.value) await loadComments()
 }
 
 /** 打开树节点右键菜单。 */
@@ -362,6 +380,109 @@ async function onImportPicked(event: Event) {
     errorMessage.value = apiErrorMessage(error, '导入失败')
   }
 }
+
+/** 拉取当前文档评论。 */
+async function loadComments() {
+  if (!current.value) return
+  commentsLoading.value = true
+  try {
+    comments.value = await api<CommentItem[]>(
+      `spaces/${spaceId.value}/nodes/${current.value.id}/comments`,
+    )
+    const ids = [...new Set(comments.value.map((item) => item.authorId))]
+    if (ids.length) {
+      try {
+        const users = await $fetch<Array<{ id: string; nickname: string }>>('/api/auth/users', {
+          params: { ids: ids.join(',') },
+          headers: auth.authHeaders(),
+        })
+        for (const user of users) commentUsers.value[user.id] = { nickname: user.nickname }
+      } catch {
+        // 昵称解析失败不影响评论展示
+      }
+    }
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  } finally {
+    commentsLoading.value = false
+  }
+}
+
+/** 打开/关闭评论抽屉。 */
+async function toggleComments() {
+  commentsOpen.value = !commentsOpen.value
+  if (commentsOpen.value) await loadComments()
+}
+
+/** 以某个大纲标题为锚点写评论。 */
+async function commentOnHeading(heading: string) {
+  commentAnchor.value = heading
+  replyTo.value = null
+  commentsOpen.value = true
+  await loadComments()
+}
+
+/** 发表评论或回复。 */
+async function submitComment() {
+  const body = commentBody.value.trim()
+  if (!body || !current.value) return
+  errorMessage.value = ''
+  try {
+    await api(`spaces/${spaceId.value}/nodes/${current.value.id}/comments`, {
+      method: 'POST',
+      body: {
+        body,
+        parentId: replyTo.value?.id ?? null,
+        anchor: commentAnchor.value ? { heading: commentAnchor.value } : null,
+      },
+    })
+    commentBody.value = ''
+    replyTo.value = null
+    await loadComments()
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  }
+}
+
+/** 解决/取消解决。 */
+async function resolveComment(comment: CommentItem) {
+  try {
+    const updated = await api<CommentItem>(
+      `spaces/${spaceId.value}/nodes/${current.value!.id}/comments/${comment.id}`,
+      { method: 'PATCH', body: { resolved: !comment.resolvedAt } },
+    )
+    Object.assign(comment, updated)
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  }
+}
+
+/** 删除评论（作者或编辑者）。 */
+async function removeComment(comment: CommentItem) {
+  if (!window.confirm('删除这条评论？')) return
+  try {
+    await api(`spaces/${spaceId.value}/nodes/${current.value!.id}/comments/${comment.id}`, {
+      method: 'DELETE',
+    })
+    await loadComments()
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  }
+}
+
+/** 评论按根/回复分组。 */
+const commentThreads = computed(() => {
+  const roots = comments.value.filter((item) => !item.parentId)
+  return roots.map((root) => ({
+    root,
+    replies: comments.value.filter((item) => item.parentId === root.id),
+  }))
+})
+
+/** 未解决的评论数。 */
+const openCommentCount = computed(
+  () => comments.value.filter((item) => !item.resolvedAt && !item.parentId).length,
+)
 
 /** 打开分享设置。 */
 async function openShare() {
@@ -857,6 +978,18 @@ onUnmounted(() => {
             <span v-if="dirty" class="mr-1 text-[11px] text-warning-700">未保存</span>
             <span v-else-if="savedTip" class="mr-1 text-[11px] text-success-700">{{ savedTip }}</span>
             <button
+              class="relative rounded-[var(--radius-field)] p-1 transition hover:bg-[var(--surface-hover)]"
+              :class="commentsOpen ? 'text-primary-600' : 'text-neutral-400'"
+              aria-label="评论"
+              @click="toggleComments"
+            >
+              <AppIcon name="chat" class="size-4" />
+              <span
+                v-if="openCommentCount > 0"
+                class="absolute -top-0.5 -right-0.5 rounded-full bg-primary-600 px-1 text-[9px] leading-3 font-medium text-white"
+              >{{ openCommentCount }}</span>
+            </button>
+            <button
               class="rounded-[var(--radius-field)] p-1 transition hover:bg-[var(--surface-hover)]"
               :class="outlineOpen ? 'text-primary-600' : 'text-neutral-400'"
               aria-label="大纲"
@@ -951,21 +1084,108 @@ onUnmounted(() => {
 
           <!-- 大纲 / 历史 -->
           <aside
-            v-if="outlineOpen || historyOpen"
+            v-if="outlineOpen || historyOpen || commentsOpen"
             class="hidden w-[224px] shrink-0 overflow-y-auto border-l border-[var(--border)] px-3 py-4 lg:block"
           >
             <template v-if="outlineOpen">
               <h2 class="mb-1.5 text-[10px] font-medium tracking-[0.12em] text-neutral-400 uppercase">大纲</h2>
-              <button
+              <div
                 v-for="(item, index) in outline"
                 :key="`${index}-${item.text}`"
-                class="block w-full truncate rounded-[var(--radius-field)] px-1.5 py-1 text-left text-[12px] text-neutral-500 transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-strong)]"
+                class="group flex items-center gap-1 rounded-[var(--radius-field)] pr-1 hover:bg-[var(--surface-hover)]"
                 :style="{ paddingLeft: `${(item.level - 1) * 10 + 6}px` }"
-                @click="jumpToHeading(index)"
               >
-                {{ item.text }}
-              </button>
+                <button
+                  class="min-w-0 flex-1 truncate py-1 text-left text-[12px] text-neutral-500 transition hover:text-[var(--text-strong)]"
+                  @click="jumpToHeading(index)"
+                >
+                  {{ item.text }}
+                </button>
+                <button
+                  class="hidden shrink-0 rounded p-0.5 text-neutral-400 hover:text-primary-600 group-hover:block"
+                  title="就该标题评论"
+                  @click="commentOnHeading(item.text)"
+                >
+                  <AppIcon name="chat" class="size-3" />
+                </button>
+              </div>
               <p v-if="outline.length === 0" class="text-[11px] text-neutral-400">暂无标题</p>
+            </template>
+
+            <template v-if="commentsOpen">
+              <h2 class="mt-5 mb-1.5 text-[10px] font-medium tracking-[0.12em] text-neutral-400 uppercase first:mt-0">
+                评论（{{ openCommentCount }} 未解决）
+              </h2>
+              <p v-if="commentsLoading" class="py-3 text-center text-[11px] text-neutral-400">加载中…</p>
+              <p
+                v-else-if="comments.length === 0"
+                class="py-3 text-[11px] text-neutral-400"
+              >
+                还没有评论
+              </p>
+              <div v-for="thread in commentThreads" :key="thread.root.id" class="mb-3">
+                <div
+                  class="rounded-[var(--radius-field)] border border-[var(--border)] p-2"
+                  :class="thread.root.resolvedAt ? 'opacity-60' : ''"
+                >
+                  <p class="flex items-center justify-between gap-1 text-[10px] text-neutral-400">
+                    <span class="truncate">
+                      {{ commentUsers[thread.root.authorId]?.nickname ?? '成员' }}
+                      <span v-if="thread.root.anchor?.heading" class="text-neutral-300">
+                        · {{ thread.root.anchor.heading }}
+                      </span>
+                    </span>
+                    <span v-if="thread.root.resolvedAt" class="shrink-0 text-success-700">已解决</span>
+                  </p>
+                  <p class="mt-1 break-words text-[12px] text-[var(--text-strong)]">
+                    {{ thread.root.body }}
+                  </p>
+                  <div class="mt-1 flex items-center gap-2 text-[10px] text-neutral-400">
+                    <button class="hover:text-primary-600" @click="replyTo = thread.root">
+                      回复
+                    </button>
+                    <button class="hover:text-primary-600" @click="resolveComment(thread.root)">
+                      {{ thread.root.resolvedAt ? '重新打开' : '解决' }}
+                    </button>
+                    <button class="hover:text-danger-500" @click="removeComment(thread.root)">
+                      删除
+                    </button>
+                  </div>
+                  <div
+                    v-for="reply in thread.replies"
+                    :key="reply.id"
+                    class="mt-2 border-l border-[var(--border)] pl-2"
+                  >
+                    <p class="text-[10px] text-neutral-400">
+                      {{ commentUsers[reply.authorId]?.nickname ?? '成员' }}
+                    </p>
+                    <p class="break-words text-[12px] text-neutral-600 dark:text-neutral-300">
+                      {{ reply.body }}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div class="mt-2">
+                <p v-if="replyTo" class="mb-1 text-[10px] text-neutral-400">
+                  回复 {{ commentUsers[replyTo.authorId]?.nickname ?? '成员' }} ·
+                  <button class="text-primary-600" @click="replyTo = null">取消</button>
+                </p>
+                <p v-else-if="commentAnchor" class="mb-1 text-[10px] text-neutral-400">
+                  锚点：{{ commentAnchor }} ·
+                  <button class="text-primary-600" @click="commentAnchor = ''">清除</button>
+                </p>
+                <textarea
+                  v-model="commentBody"
+                  rows="2"
+                  placeholder="写评论，Ctrl/Cmd + Enter 发送"
+                  class="w-full resize-none rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-1.5 text-[12px] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+                  @keydown.meta.enter.prevent="submitComment"
+                  @keydown.ctrl.enter.prevent="submitComment"
+                />
+                <Button size="sm" class="mt-1.5" :disabled="!commentBody.trim()" @click="submitComment">
+                  发送
+                </Button>
+              </div>
             </template>
 
             <template v-if="historyOpen">

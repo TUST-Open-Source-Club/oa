@@ -196,3 +196,43 @@ pub mod doc_file {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// 文档评论（块级锚点 + 一级回复）。
+pub mod node_comment {
+    use sea_orm::entity::prelude::*;
+
+    /// 评论模型。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "node_comments")]
+    pub struct Model {
+        /// ID。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: Uuid,
+        /// 空间。
+        pub space_id: Uuid,
+        /// 页面节点。
+        pub node_id: Uuid,
+        /// 父评论（一级回复）。
+        #[sea_orm(nullable)]
+        pub parent_id: Option<Uuid>,
+        /// 作者。
+        pub author_id: Uuid,
+        /// 锚点 `{ heading }`。
+        #[sea_orm(nullable, column_type = "JsonBinary")]
+        pub anchor: Option<Json>,
+        /// 正文。
+        #[sea_orm(column_type = "Text")]
+        pub body: String,
+        /// 解决时间。
+        #[sea_orm(nullable)]
+        pub resolved_at: Option<DateTimeWithTimeZone>,
+        /// 创建时间。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
