@@ -825,7 +825,39 @@ pub async fn create_from_template(
         state.now(),
     )
     .await?;
+    if let Err(err) = repo::sync_links(
+        &state.db,
+        space_id,
+        model.id,
+        &model.content_md,
+        state.now(),
+    )
+    .await
+    {
+        tracing::warn!(error = %err, "索引模板页面互链失败");
+    }
     Ok((StatusCode::CREATED, Json(NodeDto::from(&model))))
+}
+
+/// `GET /spaces/{id}/nodes/{node_id}/backlinks`：引用该文档的页面。
+pub async fn list_backlinks(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, space_id, user_id).await?;
+    load_node(&state, space_id, node_id).await?;
+    let links = repo::list_backlinks(&state.db, node_id).await?;
+    Ok(Json(json!(links
+        .iter()
+        .map(|link| json!({
+            "id": link.id,
+            "title": link.title,
+            "spaceId": link.space_id,
+            "updatedAt": link.updated_at,
+        }))
+        .collect::<Vec<_>>())))
 }
 
 /// 最近浏览参数。
@@ -990,6 +1022,9 @@ pub struct CreateCommentRequest {
     pub parent_id: Option<Uuid>,
     /// 锚点（`{ heading }`）。
     pub anchor: Option<Value>,
+    /// `@` 提示的用户（会被加入通知接收人）。
+    #[serde(default)]
+    pub mentions: Vec<Uuid>,
 }
 
 /// `POST /spaces/{id}/nodes/{node_id}/comments`：发表评论/回复。
@@ -1021,6 +1056,13 @@ pub async fn create_comment(
                 ))
             }
         }
+    }
+    if input.mentions.len() > 20 {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "一次最多 @ 20 人",
+            vec![FieldError::new("mentions", "最多 20 人")],
+        ));
     }
     if let Some(parent_id) = input.parent_id {
         let parent = repo::find_comment(&state.db, parent_id)
@@ -1062,7 +1104,10 @@ pub async fn create_comment(
             .map(|comment| comment.author_id),
         None => None,
     };
-    let targets = doc_event_targets(&state, &node, user_id, parent_author).await;
+    let mut targets = doc_event_targets(&state, &node, user_id, parent_author).await;
+    targets.extend(input.mentions.iter().copied().filter(|id| *id != user_id));
+    targets.sort();
+    targets.dedup();
     enqueue_doc_event(
         &state,
         "doc.comment.created",
@@ -1315,6 +1360,17 @@ pub async fn import_markdown(
         state.now(),
     )
     .await?;
+    if let Err(err) = repo::sync_links(
+        &state.db,
+        space_id,
+        model.id,
+        &model.content_md,
+        state.now(),
+    )
+    .await
+    {
+        tracing::warn!(error = %err, "索引导入文档互链失败");
+    }
     Ok((StatusCode::CREATED, Json(NodeDto::from(&model))))
 }
 
@@ -1728,6 +1784,17 @@ pub async fn update_content(
         state.now(),
     )
     .await?;
+    if let Err(err) = repo::sync_links(
+        &state.db,
+        space_id,
+        updated.id,
+        &updated.content_md,
+        state.now(),
+    )
+    .await
+    {
+        tracing::warn!(error = %err, "索引文档互链失败");
+    }
     let targets = doc_event_targets(&state, &model, user_id, None).await;
     enqueue_doc_event(
         &state,
@@ -1866,6 +1933,10 @@ pub fn router() -> Router<SharedState> {
         .route(
             "/spaces/{id}/nodes/{node_id}/follow",
             get(follow_status).post(toggle_follow),
+        )
+        .route(
+            "/spaces/{id}/nodes/{node_id}/backlinks",
+            get(list_backlinks),
         )
         .route("/recent", get(recent_views))
         .route(

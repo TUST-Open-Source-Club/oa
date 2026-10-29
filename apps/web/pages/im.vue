@@ -1,6 +1,12 @@
 <script setup lang="ts">
 /** 消息页：会话列表 + 消息流 + 发送 + 发起会话（4s 轮询增量）。 */
 import { Button } from '@club-oa/ui'
+import {
+  attachmentSrc as attachmentSrcOf,
+  messagePreview,
+  quoteText as quoteTextOf,
+  sortConversations,
+} from '~/utils/im'
 
 /** 用户条目。 */
 interface UserItem {
@@ -96,7 +102,7 @@ const pendingMentions = ref<Record<string, string>>({})
 const replyTo = ref<MessageItem | null>(null)
 /** 附件可直接给 <img>/<a> 用的同源地址（走 BFF 转发签名）。 */
 function attachmentSrc(attachment: AttachmentItem) {
-  return attachment.url.replace('/api/v1/im/', '/api/im/')
+  return attachmentSrcOf(attachment.url)
 }
 
 /** 读取文件为 base64（去掉 data URL 前缀）。 */
@@ -216,13 +222,7 @@ const isGroupAdmin = computed(() => ['owner', 'admin'].includes(myRole.value))
 const isOwner = computed(() => myRole.value === 'owner')
 
 /** 会话排序：有未读 @ 的置顶，其次按更新时间倒序。 */
-const sortedConversations = computed(() =>
-  [...conversations.value].sort((a, b) => {
-    if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
-    if (Boolean(a.hasMention) !== Boolean(b.hasMention)) return a.hasMention ? -1 : 1
-    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-  }),
-)
+const sortedConversations = computed(() => sortConversations(conversations.value))
 
 const active = computed(() => conversations.value.find((item) => item.id === activeId.value) ?? null)
 
@@ -586,10 +586,7 @@ function messageById(id?: string | null) {
 
 /** 引用块/预览用的单行摘要。 */
 function quoteText(message: MessageItem | null) {
-  if (!message) return '原消息不可用'
-  if (message.status === 'recalled') return '该消息已撤回'
-  if (message.type === 'text') return message.content?.text ?? ''
-  return `[${message.type}]`
+  return quoteTextOf(message)
 }
 
 /** 开始引用某条消息。 */
@@ -930,15 +927,7 @@ function timeOf(value: string) {
 
 /** 预览文本。 */
 function previewOf(conversation: ConversationItem) {
-  const last = conversation.lastMessage
-  if (!last) return '暂无消息'
-  if (last.type === 'text') return last.content?.text ?? ''
-  if (last.type === 'image') return '[图片]'
-  if (last.type === 'file') {
-    const name = last.content?.attachments?.[0]?.name
-    return name ? `[文件] ${name}` : '[文件]'
-  }
-  return `[${last.type}]`
+  return messagePreview(conversation.lastMessage)
 }
 
 let pollTimer: ReturnType<typeof setInterval> | undefined

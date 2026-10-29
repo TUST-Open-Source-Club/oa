@@ -217,3 +217,32 @@ async fn content_update_notifies_followers_not_editor() {
     assert_eq!(events.len(), 2);
     assert_eq!(targets(&events[1]), vec![member.to_string()]);
 }
+
+#[tokio::test]
+async fn comment_mentions_add_recipients() {
+    let app = spawn().await;
+    let owner = Uuid::now_v7();
+    let member = Uuid::now_v7();
+    let mentioned = Uuid::now_v7();
+    let owner_token = issue_token(&app, owner);
+    let member_token = issue_token(&app, member);
+    let space_id = create_space(&app, &owner_token).await;
+    add_member(&app, &space_id, member, "editor").await;
+    add_member(&app, &space_id, mentioned, "viewer").await;
+    let page = create_page(&app, &owner_token, &space_id, "提及文档").await;
+
+    request(
+        &app.app,
+        "POST",
+        &format!("/api/v1/doc/spaces/{space_id}/nodes/{page}/comments"),
+        Some(&member_token),
+        Some(&json!({ "body": "@陈哲 看下这里", "mentions": [mentioned] })),
+    )
+    .await
+    .expect(StatusCode::CREATED);
+
+    let event = event_of_type(&app, "doc.comment.created").await;
+    let mut expected = vec![owner.to_string(), mentioned.to_string()];
+    expected.sort();
+    assert_eq!(targets(&event), expected);
+}

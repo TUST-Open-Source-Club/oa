@@ -321,3 +321,30 @@ pub mod doc_template {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// 文档互链（`[[标题]]`）。
+pub mod doc_link {
+    use sea_orm::entity::prelude::*;
+
+    /// 链接记录。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "doc_links")]
+    pub struct Model {
+        /// 引用方。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub from_node_id: Uuid,
+        /// 被引用方。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub to_node_id: Uuid,
+        /// 空间。
+        pub space_id: Uuid,
+        /// 建立时间。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}

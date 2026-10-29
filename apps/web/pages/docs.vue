@@ -126,6 +126,8 @@ const commentBody = ref('')
 const commentAnchor = ref('')
 const replyTo = ref<CommentItem | null>(null)
 const commentUsers = ref<Record<string, { nickname: string }>>({})
+const commentMentions = ref<Record<string, string>>({})
+const backlinks = ref<Array<{ id: string; title: string; spaceId: string }>>([])
 
 const moreOpen = ref(false)
 const importInputEl = ref<HTMLInputElement | null>(null)
@@ -348,6 +350,9 @@ async function openPage(node: NodeItem) {
   versions.value = await api<VersionItem[]>(`spaces/${spaceId.value}/nodes/${node.id}/versions`)
   await loadChanges(node.id)
   void loadRecent()
+  backlinks.value = await api<Array<{ id: string; title: string; spaceId: string }>>(
+    `spaces/${spaceId.value}/nodes/${node.id}/backlinks`,
+  ).catch(() => [])
   following.value = await api<{ following: boolean }>(
     `spaces/${spaceId.value}/nodes/${node.id}/follow`,
   )
@@ -602,6 +607,7 @@ async function loadComments() {
   if (!current.value) return
   commentsLoading.value = true
   try {
+    if (spaceMembers.value.length === 0) await loadSpaceMembers()
     comments.value = await api<CommentItem[]>(
       `spaces/${spaceId.value}/nodes/${current.value.id}/comments`,
     )
@@ -638,6 +644,13 @@ async function commentOnHeading(heading: string) {
   await loadComments()
 }
 
+/** 选择 @ 提醒对象。 */
+function onPickMention(userId: string) {
+  if (!userId) return
+  const member = spaceMembers.value.find((row) => row.userId === userId)
+  commentMentions.value[userId] = spaceUsers.value[userId]?.nickname ?? member?.userId ?? '成员'
+}
+
 /** 发表评论或回复。 */
 async function submitComment() {
   const body = commentBody.value.trim()
@@ -650,10 +663,12 @@ async function submitComment() {
         body,
         parentId: replyTo.value?.id ?? null,
         anchor: commentAnchor.value ? { heading: commentAnchor.value } : null,
+        mentions: Object.keys(commentMentions.value),
       },
     })
     commentBody.value = ''
     replyTo.value = null
+    commentMentions.value = {}
     await loadComments()
   } catch (error) {
     errorMessage.value = apiErrorMessage(error)
@@ -1444,6 +1459,21 @@ onUnmounted(() => {
             v-if="outlineOpen || historyOpen || commentsOpen"
             class="hidden w-[224px] shrink-0 overflow-y-auto border-l border-[var(--border)] px-3 py-4 lg:block"
           >
+            <template v-if="backlinks.length">
+              <h2 class="mb-1.5 text-[10px] font-medium tracking-[0.12em] text-neutral-400 uppercase first:mt-0">
+                反向链接（{{ backlinks.length }}）
+              </h2>
+              <button
+                v-for="link in backlinks"
+                :key="link.id"
+                class="block w-full truncate rounded-[var(--radius-field)] px-1.5 py-1 text-left text-[12px] text-neutral-500 transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-strong)]"
+                @click="openPage({ id: link.id, parentId: null, kind: 'page', title: link.title, version: 1 })"
+              >
+                {{ link.title }}
+              </button>
+              <div class="mt-2 mb-2 border-t border-[var(--border)]" />
+            </template>
+
             <template v-if="outlineOpen">
               <h2 class="mb-1.5 text-[10px] font-medium tracking-[0.12em] text-neutral-400 uppercase">大纲</h2>
               <div
@@ -1531,6 +1561,32 @@ onUnmounted(() => {
                   锚点：{{ commentAnchor }} ·
                   <button class="text-primary-600" @click="commentAnchor = ''">清除</button>
                 </p>
+                <div v-if="Object.keys(commentMentions).length" class="mb-1 flex flex-wrap gap-1">
+                  <span
+                    v-for="(name, id) in commentMentions"
+                    :key="id"
+                    class="rounded bg-primary-50 px-1 text-[10px] text-primary-700 dark:bg-primary-900/40 dark:text-primary-200"
+                  >
+                    @{{ name }}
+                    <button class="ml-0.5 text-neutral-400" @click="delete commentMentions[id]">×</button>
+                  </span>
+                </div>
+                <div class="mb-1 flex items-center gap-1">
+                  <select
+                    class="h-6 rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] px-1 text-[10px] text-neutral-500"
+                    value=""
+                    @change="onPickMention(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
+                  >
+                    <option value="">@ 提醒谁…</option>
+                    <option
+                      v-for="member in spaceMembers.filter((row) => row.userId !== auth.user?.id)"
+                      :key="member.userId"
+                      :value="member.userId"
+                    >
+                      {{ spaceUsers[member.userId]?.nickname ?? member.userId }}
+                    </option>
+                  </select>
+                </div>
                 <textarea
                   v-model="commentBody"
                   rows="2"

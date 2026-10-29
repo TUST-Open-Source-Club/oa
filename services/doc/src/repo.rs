@@ -11,7 +11,8 @@ use uuid::Uuid;
 use club_common::{new_id, AppError};
 
 use crate::entity::{
-    doc_template, node, node_comment, node_follow, node_view, space, space_member, version,
+    doc_link, doc_template, node, node_comment, node_follow, node_view, space, space_member,
+    version,
 };
 
 /// 数据库错误 → 统一错误。
@@ -1013,4 +1014,108 @@ pub async fn delete_template(db: &DatabaseConnection, template_id: Uuid) -> Resu
         .await
         .map_err(map_db_err)?;
     Ok(result.rows_affected)
+}
+
+/// 提取 `[[标题]]` 内链标题（去重、去空白）。
+pub fn wiki_link_titles(content: &str) -> Vec<String> {
+    let mut titles: Vec<String> = Vec::new();
+    let mut rest = content;
+    while let Some(start) = rest.find("[[") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("]]") else {
+            break;
+        };
+        let title = after[..end].trim();
+        if !title.is_empty() && !title.contains('\n') && !titles.iter().any(|item| item == title) {
+            titles.push(title.to_string());
+        }
+        rest = &after[end + 2..];
+    }
+    titles
+}
+
+/// 重建某文档的出链（`[[标题]]` → 同空间同标题页面）。
+pub async fn sync_links(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    node_id: Uuid,
+    content: &str,
+    now: DateTime<Utc>,
+) -> Result<(), AppError> {
+    doc_link::Entity::delete_many()
+        .filter(doc_link::Column::FromNodeId.eq(node_id))
+        .exec(db)
+        .await
+        .map_err(map_db_err)?;
+    let titles = wiki_link_titles(content);
+    if titles.is_empty() {
+        return Ok(());
+    }
+    let candidates = node::Entity::find()
+        .filter(node::Column::SpaceId.eq(space_id))
+        .filter(node::Column::Kind.eq(node::KIND_PAGE))
+        .filter(node::Column::DeletedAt.is_null())
+        .all(db)
+        .await
+        .map_err(map_db_err)?;
+    for title in titles {
+        if let Some(target) = candidates
+            .iter()
+            .find(|item| item.title == title && item.id != node_id)
+        {
+            doc_link::ActiveModel {
+                from_node_id: Set(node_id),
+                to_node_id: Set(target.id),
+                space_id: Set(space_id),
+                created_at: Set(now.fixed_offset()),
+            }
+            .insert(db)
+            .await
+            .map_err(map_db_err)?;
+        }
+    }
+    Ok(())
+}
+
+/// 反向链接行。
+#[derive(Debug, Clone)]
+pub struct Backlink {
+    /// 引用方 ID。
+    pub id: Uuid,
+    /// 引用方标题。
+    pub title: String,
+    /// 空间 ID。
+    pub space_id: Uuid,
+    /// 引用方更新时间。
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 列出引用某文档的页面。
+pub async fn list_backlinks(
+    db: &DatabaseConnection,
+    node_id: Uuid,
+) -> Result<Vec<Backlink>, AppError> {
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT n.id, n.title, n.space_id, n.updated_at \
+             FROM doc_links l JOIN nodes n ON n.id = l.from_node_id \
+             WHERE l.to_node_id = $1 AND n.deleted_at IS NULL \
+             ORDER BY n.updated_at DESC",
+            vec![sea_orm::sea_query::Value::Uuid(Some(node_id))],
+        ))
+        .await
+        .map_err(map_db_err)?;
+    let mut result = Vec::with_capacity(rows.len());
+    for row in rows {
+        result.push(Backlink {
+            id: row.try_get_by_index(0).map_err(map_db_err)?,
+            title: row.try_get_by_index(1).map_err(map_db_err)?,
+            space_id: row.try_get_by_index(2).map_err(map_db_err)?,
+            updated_at: row
+                .try_get_by_index::<DateTime<Utc>>(3)
+                .map_err(map_db_err)?,
+        });
+    }
+    Ok(result)
 }
