@@ -167,6 +167,9 @@ pub mod task {
         /// 完成时间。
         #[sea_orm(nullable)]
         pub completed_at: Option<DateTimeWithTimeZone>,
+        /// 归档时间。
+        #[sea_orm(nullable)]
+        pub archived_at: Option<DateTimeWithTimeZone>,
         /// 创建时间。
         pub created_at: DateTimeWithTimeZone,
         /// 更新时间。
@@ -289,6 +292,57 @@ pub mod comment {
         pub content_md: String,
         /// 创建时间。
         pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+/// 看板标签。
+pub mod label {
+    use sea_orm::entity::prelude::*;
+
+    /// 标签模型。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "labels")]
+    pub struct Model {
+        /// ID。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: Uuid,
+        /// 所属看板。
+        pub board_id: Uuid,
+        /// 名称。
+        pub name: String,
+        /// 颜色（#rrggbb）。
+        pub color: String,
+        /// 创建时间。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+/// 卡片标签关联。
+pub mod task_label {
+    use sea_orm::entity::prelude::*;
+
+    /// 关联模型。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "task_labels")]
+    pub struct Model {
+        /// 任务。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub task_id: Uuid,
+        /// 标签。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub label_id: Uuid,
     }
 
     /// 关系。

@@ -3,6 +3,11 @@
 import { Button, Input } from '@club-oa/ui'
 
 interface ProjectItem { id: string; name: string }
+interface LabelItem {
+  id: string
+  name: string
+  color: string
+}
 interface ColumnItem { id: string; name: string; position: number; isDone: boolean }
 interface TaskItem {
   id: string
@@ -16,6 +21,7 @@ interface TaskItem {
   status: string
   completedAt: string | null
   priority: string
+  labels?: Array<{ id: string; name: string; color: string }>
 }
 interface UserItem { id: string; username: string; nickname: string; department: string | null }
 interface AttachmentItem { id: string; name: string; size: number; mime: string; createdAt: string }
@@ -25,6 +31,11 @@ const auth = useAuthStore()
 const projects = ref<ProjectItem[]>([])
 const projectId = ref('')
 const boards = ref<Array<{ id: string; name: string; position: number }>>([])
+const labels = ref<LabelItem[]>([])
+const draftLabelIds = ref<string[]>([])
+const filters = reactive({ q: '', assigneeId: '', labelId: '', due: '' })
+const archivedOpen = ref(false)
+const archivedTasks = ref<TaskItem[]>([])
 const boardId = ref('')
 const columns = ref<ColumnItem[]>([])
 const tasks = ref<TaskItem[]>([])
@@ -140,12 +151,19 @@ async function loadBoard() {
     tasks.value = []
     return
   }
+  const params = new URLSearchParams()
+  if (filters.q.trim()) params.set('q', filters.q.trim())
+  if (filters.assigneeId) params.set('assigneeId', filters.assigneeId)
+  if (filters.labelId) params.set('labelId', filters.labelId)
+  if (filters.due) params.set('due', filters.due)
+  const query = params.toString() ? `?${params.toString()}` : ''
   const [cols, list] = await Promise.all([
     api<ColumnItem[]>(`boards/${boardId.value}/columns`),
-    api<TaskItem[]>(`boards/${boardId.value}/tasks`),
+    api<TaskItem[]>(`boards/${boardId.value}/tasks${query}`),
   ])
   columns.value = cols
   tasks.value = list
+  labels.value = await api<LabelItem[]>(`boards/${boardId.value}/labels`).catch(() => [])
   await resolveUsers(list.flatMap((task) => task.assigneeIds ?? []))
 }
 
@@ -162,6 +180,58 @@ async function createBoard() {
   await loadBoard()
 }
 
+/** 切换草稿里的标签选择。 */
+function toggleDraftLabel(labelId: string) {
+  draftLabelIds.value = draftLabelIds.value.includes(labelId)
+    ? draftLabelIds.value.filter((id) => id !== labelId)
+    : [...draftLabelIds.value, labelId]
+}
+
+/** 新建看板标签（管理员）。 */
+async function createLabel() {
+  if (!boardId.value) return
+  const name = window.prompt('标签名称', '新标签')
+  if (!name || !name.trim()) return
+  const palette = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6']
+  const color = palette[labels.value.length % palette.length]
+  await api(`boards/${boardId.value}/labels`, {
+    method: 'POST',
+    body: { name: name.trim(), color },
+  })
+  labels.value = await api<LabelItem[]>(`boards/${boardId.value}/labels`)
+}
+
+/** 清空筛选。 */
+function clearFilters() {
+  filters.q = ''
+  filters.assigneeId = ''
+  filters.labelId = ''
+  filters.due = ''
+  void loadBoard()
+}
+
+/** 归档当前卡片。 */
+async function archiveTask() {
+  if (!editingId.value) return
+  await api(`tasks/${editingId.value}/archive`, { method: 'POST' })
+  taskOpen.value = false
+  await loadBoard()
+}
+
+/** 打开归档列表。 */
+async function openArchived() {
+  if (!boardId.value) return
+  archivedTasks.value = await api<TaskItem[]>(`boards/${boardId.value}/archived-tasks`)
+  archivedOpen.value = true
+}
+
+/** 恢复归档卡片。 */
+async function restoreTask(task: TaskItem) {
+  await api(`tasks/${task.id}/restore`, { method: 'POST' })
+  archivedTasks.value = await api<TaskItem[]>(`boards/${boardId.value}/archived-tasks`)
+  await loadBoard()
+}
+
 /** 打开新建弹窗。 */
 function openCreate(columnId?: string) {
   editingId.value = ''
@@ -174,6 +244,7 @@ function openCreate(columnId?: string) {
     startAt: '',
     dueAt: '',
   })
+  draftLabelIds.value = []
   taskOpen.value = true
 }
 
@@ -190,6 +261,7 @@ function openEdit(task: TaskItem) {
     dueAt: toLocalInput(task.dueAt),
   })
   attachments.value = []
+  draftLabelIds.value = (task.labels ?? []).map((item) => item.id)
   taskOpen.value = true
 }
 
@@ -210,8 +282,26 @@ async function saveTask() {
   try {
     if (editingId.value) {
       await api(`tasks/${editingId.value}`, { method: 'PATCH', body: payload })
+      const before = new Set(
+        (tasks.value.find((item) => item.id === editingId.value)?.labels ?? []).map(
+          (item) => item.id,
+        ),
+      )
+      const after = new Set(draftLabelIds.value)
+      for (const id of after) {
+        if (!before.has(id)) await api(`tasks/${editingId.value}/labels/${id}`, { method: 'POST' })
+      }
+      for (const id of before) {
+        if (!after.has(id)) await api(`tasks/${editingId.value}/labels/${id}`, { method: 'DELETE' })
+      }
     } else {
-      await api(`projects/${projectId.value}/tasks`, { method: 'POST', body: { ...payload, columnId: draft.columnId } })
+      const created = await api<{ id: string }>(`projects/${projectId.value}/tasks`, {
+        method: 'POST',
+        body: { ...payload, columnId: draft.columnId },
+      })
+      for (const labelId of draftLabelIds.value) {
+        await api(`tasks/${created.id}/labels/${labelId}`, { method: 'POST' })
+      }
     }
     taskOpen.value = false
     await loadBoard()
@@ -436,6 +526,44 @@ onMounted(loadProjects)
       </div>
     </header>
 
+    <!-- 筛选 -->
+    <div v-if="boardId" class="mt-3 flex flex-wrap items-center gap-2">
+      <Input
+        v-model="filters.q"
+        placeholder="搜索标题"
+        class="w-40"
+        @keydown.enter="loadBoard"
+      />
+      <select
+        v-model="filters.assigneeId"
+        class="h-8 rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12px] text-neutral-600"
+        @change="loadBoard"
+      >
+        <option value="">全部负责人</option>
+        <option v-for="(user, id) in users" :key="id" :value="id">{{ user.nickname }}</option>
+      </select>
+      <select
+        v-model="filters.labelId"
+        class="h-8 rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12px] text-neutral-600"
+        @change="loadBoard"
+      >
+        <option value="">全部标签</option>
+        <option v-for="label in labels" :key="label.id" :value="label.id">{{ label.name }}</option>
+      </select>
+      <select
+        v-model="filters.due"
+        class="h-8 rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12px] text-neutral-600"
+        @change="loadBoard"
+      >
+        <option value="">全部时间</option>
+        <option value="overdue">已逾期</option>
+        <option value="today">今天到期</option>
+        <option value="week">本周到期</option>
+      </select>
+      <Button variant="ghost" size="sm" @click="clearFilters">清除筛选</Button>
+      <Button variant="ghost" size="sm" @click="openArchived">已归档</Button>
+    </div>
+
     <p
       v-if="message"
       role="alert"
@@ -483,6 +611,15 @@ onMounted(loadProjects)
             @dragstart="draggingId = task.id"
             @dragend="draggingId = ''"
           >
+            <div v-if="(task.labels ?? []).length" class="mb-1.5 flex flex-wrap gap-1 pl-3">
+              <span
+                v-for="label in task.labels"
+                :key="label.id"
+                class="h-1.5 w-8 rounded-full"
+                :style="{ backgroundColor: label.color }"
+                :title="label.name"
+              />
+            </div>
             <div class="flex items-start gap-1.5">
               <span class="mt-[5px] size-1.5 shrink-0 rounded-full" :class="priorityOf(task.priority).dot" />
               <p
@@ -627,6 +764,29 @@ onMounted(loadProjects)
           <UserPicker v-model="draft.assigneeIds" multiple placeholder="搜索并选择负责人（可留空）" />
         </div>
 
+        <div>
+          <div class="mb-1.5 flex items-center justify-between">
+            <span class="text-[11px] font-medium text-neutral-500">标签</span>
+            <button class="text-[11px] text-primary-600 hover:underline" @click="createLabel">新建标签</button>
+          </div>
+          <div v-if="labels.length" class="flex flex-wrap gap-1.5">
+            <button
+              v-for="label in labels"
+              :key="label.id"
+              class="flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition"
+              :class="draftLabelIds.includes(label.id)
+                ? 'border-transparent text-white'
+                : 'border-[var(--border)] text-neutral-500 hover:border-[var(--border-strong)]'"
+              :style="draftLabelIds.includes(label.id) ? { backgroundColor: label.color } : {}"
+              @click="toggleDraftLabel(label.id)"
+            >
+              <span class="size-1.5 rounded-full" :style="{ backgroundColor: draftLabelIds.includes(label.id) ? '#fff' : label.color }" />
+              {{ label.name }}
+            </button>
+          </div>
+          <p v-else class="text-[11px] text-neutral-400">还没有标签，点右侧新建</p>
+        </div>
+
         <div v-if="editingId" class="rounded-[var(--radius-field)] border border-[var(--border)] p-3">
           <div class="mb-1.5 flex items-center justify-between">
             <span class="text-[11px] font-medium text-neutral-500">附件（{{ attachments.length }}）</span>
@@ -687,8 +847,34 @@ onMounted(loadProjects)
         </div>
       </div>
       <template #footer>
-        <Button variant="secondary" @click="taskOpen = false">取消</Button>
-        <Button :disabled="!draft.title.trim() || saving" @click="saveTask">{{ saving ? '保存中…' : '保存' }}</Button>
+        <div class="flex w-full items-center justify-between">
+          <Button v-if="editingId" variant="danger" size="sm" @click="archiveTask">归档</Button>
+          <span v-else />
+          <div class="flex items-center gap-2">
+            <Button variant="secondary" @click="taskOpen = false">取消</Button>
+            <Button :loading="saving" @click="saveTask">保存</Button>
+          </div>
+        </div>
+      </template>
+    </AppModal>
+
+    <!-- 归档 -->
+    <AppModal :open="archivedOpen" title="已归档卡片" @close="archivedOpen = false">
+      <p v-if="archivedTasks.length === 0" class="py-6 text-center text-[12px] text-neutral-400">
+        没有归档卡片
+      </p>
+      <ul v-else class="space-y-1.5">
+        <li
+          v-for="task in archivedTasks"
+          :key="task.id"
+          class="flex items-center justify-between gap-3 rounded-[var(--radius-field)] border border-[var(--border)] px-2.5 py-2"
+        >
+          <span class="min-w-0 flex-1 truncate text-[13px] text-[var(--text-strong)]">{{ task.title }}</span>
+          <Button variant="secondary" size="sm" @click="restoreTask(task)">恢复</Button>
+        </li>
+      </ul>
+      <template #footer>
+        <Button variant="secondary" @click="archivedOpen = false">关闭</Button>
       </template>
     </AppModal>
 

@@ -13,7 +13,7 @@ use uuid::Uuid;
 use club_auth_sdk::AuthUser;
 use club_common::{new_id, AppError, FieldError};
 
-use crate::entity::{board, column, comment, project, subtask, task, task_attachment};
+use crate::entity::{board, column, comment, label, project, subtask, task, task_attachment};
 use crate::repo;
 use crate::state::SharedState;
 
@@ -131,6 +131,30 @@ pub struct TaskDto {
     pub completed_at: Option<DateTime<FixedOffset>>,
     /// 更新时间。
     pub updated_at: DateTime<FixedOffset>,
+    /// 标签。
+    pub labels: Vec<LabelDto>,
+}
+
+/// 标签 DTO。
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelDto {
+    /// ID。
+    pub id: String,
+    /// 名称。
+    pub name: String,
+    /// 颜色。
+    pub color: String,
+}
+
+impl From<&label::Model> for LabelDto {
+    fn from(model: &label::Model) -> Self {
+        Self {
+            id: model.id.to_string(),
+            name: model.name.clone(),
+            color: model.color.clone(),
+        }
+    }
 }
 
 impl From<&task::Model> for TaskDto {
@@ -154,6 +178,7 @@ impl From<&task::Model> for TaskDto {
             position: model.position,
             completed_at: model.completed_at,
             updated_at: model.updated_at,
+            labels: Vec::new(),
         }
     }
 }
@@ -260,6 +285,151 @@ pub async fn delete_column(
         ));
     }
     repo::delete_column(&state.db, column_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 给任务 DTO 批量填充标签。
+async fn fill_labels(state: &SharedState, models: &[task::Model], dtos: &mut [TaskDto]) {
+    let ids: Vec<Uuid> = models.iter().map(|model| model.id).collect();
+    let map = repo::labels_for_tasks(&state.db, &ids)
+        .await
+        .unwrap_or_default();
+    for dto in dtos.iter_mut() {
+        if let Ok(id) = Uuid::parse_str(&dto.id) {
+            if let Some(labels) = map.get(&id) {
+                dto.labels = labels.iter().map(LabelDto::from).collect();
+            }
+        }
+    }
+}
+
+/// 校验颜色格式（#rrggbb）。
+fn valid_color(color: &str) -> bool {
+    color.len() == 7
+        && color.starts_with('#')
+        && color[1..].chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+/// `GET /boards/{id}/labels`：看板标签。
+pub async fn list_labels(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+) -> Result<Json<Vec<LabelDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_member(&state.db, board.project_id, user_id).await?;
+    let labels = repo::list_labels(&state.db, board_id).await?;
+    Ok(Json(labels.iter().map(LabelDto::from).collect()))
+}
+
+/// 标签请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelRequest {
+    /// 名称。
+    pub name: String,
+    /// 颜色（#rrggbb）。
+    pub color: String,
+}
+
+/// `POST /boards/{id}/labels`：新建标签（管理员）。
+pub async fn create_label(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+    Json(input): Json<LabelRequest>,
+) -> Result<(StatusCode, Json<LabelDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_admin(&state.db, board.project_id, user_id).await?;
+    let name = input.name.trim();
+    if name.is_empty() || name.chars().count() > 32 || !valid_color(&input.color) {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "标签名称或颜色不合法",
+            vec![FieldError::new("name/color", "名称 1~32 字，颜色 #rrggbb")],
+        ));
+    }
+    let model = repo::create_label(&state.db, board_id, name, &input.color, state.now()).await?;
+    Ok((StatusCode::CREATED, Json(LabelDto::from(&model))))
+}
+
+/// `PATCH /labels/{id}`：更新标签。
+pub async fn update_label(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(label_id): Path<Uuid>,
+    Json(input): Json<LabelRequest>,
+) -> Result<Json<LabelDto>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let label = repo::find_label(&state.db, label_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_LABEL_NOT_FOUND", "标签不存在"))?;
+    let board = load_board(&state, label.board_id).await?;
+    repo::ensure_admin(&state.db, board.project_id, user_id).await?;
+    let name = input.name.trim();
+    if name.is_empty() || name.chars().count() > 32 || !valid_color(&input.color) {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "标签名称或颜色不合法",
+            vec![FieldError::new("name/color", "名称 1~32 字，颜色 #rrggbb")],
+        ));
+    }
+    let updated = repo::update_label(&state.db, &label, name, &input.color).await?;
+    Ok(Json(LabelDto::from(&updated)))
+}
+
+/// `DELETE /labels/{id}`：删除标签。
+pub async fn delete_label(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(label_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let label = repo::find_label(&state.db, label_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_LABEL_NOT_FOUND", "标签不存在"))?;
+    let board = load_board(&state, label.board_id).await?;
+    repo::ensure_admin(&state.db, board.project_id, user_id).await?;
+    repo::delete_label(&state.db, label_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /tasks/{id}/labels/{label_id}`：给卡片打标签。
+pub async fn attach_label(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((task_id, label_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let model = load_task_for_member(&state, user_id, task_id).await?;
+    let label = repo::find_label(&state.db, label_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_LABEL_NOT_FOUND", "标签不存在"))?;
+    let column = repo::find_column(&state.db, model.column_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_COLUMN_NOT_FOUND", "看板列不存在"))?;
+    if label.board_id != column.board_id {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "只能使用当前看板的标签",
+            vec![FieldError::new("labelId", "标签不属于该看板")],
+        ));
+    }
+    repo::attach_label(&state.db, task_id, label_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /tasks/{id}/labels/{label_id}`：取消卡片标签。
+pub async fn detach_label(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((task_id, label_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    load_task_for_member(&state, user_id, task_id).await?;
+    repo::detach_label(&state.db, task_id, label_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -411,8 +581,44 @@ pub async fn create_board_column(
     Ok((StatusCode::CREATED, Json(ColumnDto::from(&model))))
 }
 
-/// `GET /boards/{id}/tasks`：看板任务。
+/// 看板任务筛选参数。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardTaskQuery {
+    /// 负责人。
+    pub assignee_id: Option<Uuid>,
+    /// 标签。
+    pub label_id: Option<Uuid>,
+    /// 关键词。
+    pub q: Option<String>,
+    /// 截止：overdue / today / week。
+    pub due: Option<String>,
+}
+
+/// `GET /boards/{id}/tasks`：看板任务（支持筛选）。
 pub async fn list_board_tasks(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+    Query(query): Query<BoardTaskQuery>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_member(&state.db, board.project_id, user_id).await?;
+    let filter = repo::TaskFilter {
+        assignee_id: query.assignee_id,
+        label_id: query.label_id,
+        keyword: query.q,
+        due: query.due,
+    };
+    let tasks = repo::list_tasks_by_board(&state.db, board_id, &filter, state.now()).await?;
+    let mut dtos = tasks.iter().map(TaskDto::from).collect::<Vec<_>>();
+    fill_labels(&state, &tasks, &mut dtos).await;
+    Ok(Json(json!(dtos)))
+}
+
+/// `GET /boards/{id}/archived-tasks`：归档卡片。
+pub async fn list_archived_tasks(
     State(state): State<SharedState>,
     auth: AuthUser,
     Path(board_id): Path<Uuid>,
@@ -420,9 +626,34 @@ pub async fn list_board_tasks(
     let user_id = user_id_of(&auth)?;
     let board = load_board(&state, board_id).await?;
     repo::ensure_member(&state.db, board.project_id, user_id).await?;
-    let tasks = repo::list_tasks_by_board(&state.db, board_id).await?;
-    let dtos = tasks.iter().map(TaskDto::from).collect::<Vec<_>>();
+    let tasks = repo::list_archived_tasks(&state.db, board_id).await?;
+    let mut dtos = tasks.iter().map(TaskDto::from).collect::<Vec<_>>();
+    fill_labels(&state, &tasks, &mut dtos).await;
     Ok(Json(json!(dtos)))
+}
+
+/// `POST /tasks/{id}/archive`：归档卡片。
+pub async fn archive_task(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(task_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let model = load_task_for_member(&state, user_id, task_id).await?;
+    repo::archive_task(&state.db, &model, state.now(), true).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /tasks/{id}/restore`：恢复归档卡片。
+pub async fn restore_task(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(task_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let model = load_task_for_member(&state, user_id, task_id).await?;
+    repo::archive_task(&state.db, &model, state.now(), false).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `GET /projects/{id}/columns`。
@@ -502,6 +733,10 @@ async fn task_dto(state: &SharedState, model: &task::Model) -> Result<TaskDto, A
     if !assignees.is_empty() {
         dto.assignee_ids = assignees.iter().map(|id| id.to_string()).collect();
         dto.assignee_id = assignees.first().map(|id| id.to_string());
+    }
+    let mut labels = repo::labels_for_tasks(&state.db, &[model.id]).await?;
+    if let Some(rows) = labels.remove(&model.id) {
+        dto.labels = rows.iter().map(LabelDto::from).collect();
     }
     Ok(dto)
 }
@@ -651,7 +886,7 @@ pub async fn get_task(
 ) -> Result<Json<TaskDto>, AppError> {
     let user_id = user_id_of(&auth)?;
     let model = load_task_for_member(&state, user_id, task_id).await?;
-    Ok(Json(TaskDto::from(&model)))
+    Ok(Json(task_dto(&state, &model).await?))
 }
 
 /// 三态 JSON：字段缺省 = None，显式 null = Some(None)，有值 = Some(Some(v))。
@@ -1542,6 +1777,18 @@ pub fn router() -> Router<SharedState> {
             get(list_board_columns).post(create_board_column),
         )
         .route("/boards/{id}/tasks", get(list_board_tasks))
+        .route("/boards/{id}/archived-tasks", get(list_archived_tasks))
+        .route("/tasks/{id}/archive", post(archive_task))
+        .route("/tasks/{id}/restore", post(restore_task))
+        .route("/boards/{id}/labels", get(list_labels).post(create_label))
+        .route(
+            "/labels/{id}",
+            axum::routing::patch(update_label).delete(delete_label),
+        )
+        .route(
+            "/tasks/{id}/labels/{label_id}",
+            post(attach_label).delete(detach_label),
+        )
         .route("/columns/{id}", axum::routing::delete(delete_column))
         .route("/projects/{id}/tasks", get(list_tasks).post(create_task))
         .route("/columns/{id}/tasks", post(create_task_in_column))

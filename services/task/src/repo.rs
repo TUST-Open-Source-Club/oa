@@ -9,7 +9,10 @@ use uuid::Uuid;
 
 use club_common::{new_id, AppError};
 
-use crate::entity::{board, column, comment, project, project_member, subtask, task};
+use crate::entity::{
+    board, column, comment, label, project, project_member, subtask, task, task_assignee,
+    task_label,
+};
 
 /// 数据库错误 → 统一错误。
 pub fn map_db_err(err: DbErr) -> AppError {
@@ -255,6 +258,7 @@ pub async fn create_task(
         created_by: Set(user_id),
         status: Set("active".to_string()),
         completed_at: Set(None),
+        archived_at: Set(None),
         created_at: Set(now.fixed_offset()),
         updated_at: Set(now.fixed_offset()),
     }
@@ -688,6 +692,7 @@ pub async fn restore_task(
             .and_then(serde_json::Value::as_i64)
             .unwrap_or(0)),
         created_by: Set(fallback_created_by),
+        archived_at: Set(None),
         status: Set(snapshot
             .get("status")
             .and_then(serde_json::Value::as_str)
@@ -795,8 +800,90 @@ pub async fn board_column_count(db: &DatabaseConnection, board_id: Uuid) -> Resu
         .map_err(map_db_err)
 }
 
-/// 看板下的任务。
+/// 看板任务筛选条件。
+#[derive(Debug, Default, Clone)]
+pub struct TaskFilter {
+    /// 负责人。
+    pub assignee_id: Option<Uuid>,
+    /// 标签。
+    pub label_id: Option<Uuid>,
+    /// 标题关键词。
+    pub keyword: Option<String>,
+    /// 截止：overdue / today / week。
+    pub due: Option<String>,
+}
+
+/// 看板下的任务（排除归档，可按负责人/标签/关键词/截止过滤）。
 pub async fn list_tasks_by_board(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+    filter: &TaskFilter,
+    now: DateTime<Utc>,
+) -> Result<Vec<task::Model>, AppError> {
+    let columns = list_columns_by_board(db, board_id).await?;
+    let ids: Vec<Uuid> = columns.iter().map(|column| column.id).collect();
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut select = task::Entity::find()
+        .filter(task::Column::ColumnId.is_in(ids))
+        .filter(task::Column::Status.ne("terminated"))
+        .filter(task::Column::ArchivedAt.is_null());
+    if let Some(assignee) = filter.assignee_id {
+        let assigned: Vec<Uuid> = task_assignee::Entity::find()
+            .filter(task_assignee::Column::UserId.eq(assignee))
+            .all(db)
+            .await
+            .map_err(map_db_err)?
+            .into_iter()
+            .map(|row| row.task_id)
+            .collect();
+        select = select.filter(task::Column::Id.is_in(assigned));
+    }
+    if let Some(label_id) = filter.label_id {
+        let tagged: Vec<Uuid> = task_label::Entity::find()
+            .filter(task_label::Column::LabelId.eq(label_id))
+            .all(db)
+            .await
+            .map_err(map_db_err)?
+            .into_iter()
+            .map(|row| row.task_id)
+            .collect();
+        select = select.filter(task::Column::Id.is_in(tagged));
+    }
+    if let Some(keyword) = filter
+        .keyword
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        select = select.filter(task::Column::Title.contains(keyword));
+    }
+    match filter.due.as_deref() {
+        Some("overdue") => {
+            select = select.filter(task::Column::DueAt.lt(now.fixed_offset()));
+        }
+        Some("today") => {
+            select = select
+                .filter(task::Column::DueAt.gte(now.fixed_offset()))
+                .filter(task::Column::DueAt.lt((now + chrono::Duration::days(1)).fixed_offset()));
+        }
+        Some("week") => {
+            select = select
+                .filter(task::Column::DueAt.gte(now.fixed_offset()))
+                .filter(task::Column::DueAt.lt((now + chrono::Duration::days(7)).fixed_offset()));
+        }
+        _ => {}
+    }
+    select
+        .order_by_asc(task::Column::Position)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 看板归档任务。
+pub async fn list_archived_tasks(
     db: &DatabaseConnection,
     board_id: Uuid,
 ) -> Result<Vec<task::Model>, AppError> {
@@ -807,11 +894,27 @@ pub async fn list_tasks_by_board(
     }
     task::Entity::find()
         .filter(task::Column::ColumnId.is_in(ids))
-        .filter(task::Column::Status.ne("terminated"))
-        .order_by_asc(task::Column::Position)
+        .filter(task::Column::ArchivedAt.is_not_null())
+        .order_by_desc(task::Column::ArchivedAt)
         .all(db)
         .await
         .map_err(map_db_err)
+}
+
+/// 归档卡片。
+pub async fn archive_task(
+    db: &DatabaseConnection,
+    model: &task::Model,
+    now: DateTime<Utc>,
+    archived: bool,
+) -> Result<task::Model, AppError> {
+    let mut active: task::ActiveModel = model.clone().into();
+    active.archived_at = Set(if archived {
+        Some(now.fixed_offset())
+    } else {
+        None
+    });
+    active.update(db).await.map_err(map_db_err)
 }
 
 /// 删除空列（有任务时由调用方拦截）。
@@ -830,4 +933,145 @@ pub async fn column_task_count(db: &DatabaseConnection, column_id: Uuid) -> Resu
         .count(db)
         .await
         .map_err(map_db_err)
+}
+
+/// 看板标签。
+pub async fn list_labels(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+) -> Result<Vec<label::Model>, AppError> {
+    label::Entity::find()
+        .filter(label::Column::BoardId.eq(board_id))
+        .order_by_asc(label::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 新建标签。
+pub async fn create_label(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+    name: &str,
+    color: &str,
+    now: DateTime<Utc>,
+) -> Result<label::Model, AppError> {
+    label::ActiveModel {
+        id: Set(new_id()),
+        board_id: Set(board_id),
+        name: Set(name.to_string()),
+        color: Set(color.to_string()),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}
+
+/// 查找标签。
+pub async fn find_label(
+    db: &DatabaseConnection,
+    label_id: Uuid,
+) -> Result<Option<label::Model>, AppError> {
+    label::Entity::find_by_id(label_id)
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 更新标签名称/颜色。
+pub async fn update_label(
+    db: &DatabaseConnection,
+    current: &label::Model,
+    name: &str,
+    color: &str,
+) -> Result<label::Model, AppError> {
+    let mut active: label::ActiveModel = current.clone().into();
+    active.name = Set(name.to_string());
+    active.color = Set(color.to_string());
+    active.update(db).await.map_err(map_db_err)
+}
+
+/// 删除标签（同时清掉卡片关联）。
+pub async fn delete_label(db: &DatabaseConnection, label_id: Uuid) -> Result<(), AppError> {
+    task_label::Entity::delete_many()
+        .filter(task_label::Column::LabelId.eq(label_id))
+        .exec(db)
+        .await
+        .map_err(map_db_err)?;
+    label::Entity::delete_by_id(label_id)
+        .exec(db)
+        .await
+        .map(|_| ())
+        .map_err(map_db_err)
+}
+
+/// 给卡片打标签（幂等）。
+pub async fn attach_label(
+    db: &DatabaseConnection,
+    task_id: Uuid,
+    label_id: Uuid,
+) -> Result<(), AppError> {
+    let existing = task_label::Entity::find_by_id((task_id, label_id))
+        .one(db)
+        .await
+        .map_err(map_db_err)?;
+    if existing.is_some() {
+        return Ok(());
+    }
+    task_label::ActiveModel {
+        task_id: Set(task_id),
+        label_id: Set(label_id),
+    }
+    .insert(db)
+    .await
+    .map(|_| ())
+    .map_err(map_db_err)
+}
+
+/// 取消卡片标签。
+pub async fn detach_label(
+    db: &DatabaseConnection,
+    task_id: Uuid,
+    label_id: Uuid,
+) -> Result<(), AppError> {
+    task_label::Entity::delete_by_id((task_id, label_id))
+        .exec(db)
+        .await
+        .map(|_| ())
+        .map_err(map_db_err)
+}
+
+/// 卡片 → 标签映射。
+pub async fn labels_for_tasks(
+    db: &DatabaseConnection,
+    task_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, Vec<label::Model>>, AppError> {
+    let mut result: std::collections::HashMap<Uuid, Vec<label::Model>> =
+        std::collections::HashMap::new();
+    if task_ids.is_empty() {
+        return Ok(result);
+    }
+    let links = task_label::Entity::find()
+        .filter(task_label::Column::TaskId.is_in(task_ids.to_vec()))
+        .all(db)
+        .await
+        .map_err(map_db_err)?;
+    if links.is_empty() {
+        return Ok(result);
+    }
+    let label_ids: Vec<Uuid> = links.iter().map(|row| row.label_id).collect();
+    let labels = label::Entity::find()
+        .filter(label::Column::Id.is_in(label_ids))
+        .all(db)
+        .await
+        .map_err(map_db_err)?;
+    let by_id: std::collections::HashMap<Uuid, label::Model> =
+        labels.into_iter().map(|row| (row.id, row)).collect();
+    for link in links {
+        if let Some(label) = by_id.get(&link.label_id) {
+            result.entry(link.task_id).or_default().push(label.clone());
+        }
+    }
+    Ok(result)
 }
