@@ -30,7 +30,7 @@ async fn create_space(app: &TestApp, token: &str) -> String {
         .to_string()
 }
 
-async fn members(app: &TestApp, token: &str, space_id: &str) -> serde_json::Value {
+async fn members_raw(app: &TestApp, token: &str, space_id: &str) -> TestResponse {
     request(
         &app.app,
         "GET",
@@ -39,7 +39,10 @@ async fn members(app: &TestApp, token: &str, space_id: &str) -> serde_json::Valu
         None,
     )
     .await
-    .expect(StatusCode::OK)
+}
+
+async fn members(app: &TestApp, token: &str, space_id: &str) -> serde_json::Value {
+    members_raw(app, token, space_id).await.expect(StatusCode::OK)
 }
 
 async fn invite(
@@ -171,7 +174,7 @@ async fn admin_limits_and_removal() {
     )
     .await
     .expect(StatusCode::NO_CONTENT);
-    members(&app, &viewer_token, &space_id)
+    members_raw(&app, &viewer_token, &space_id)
         .await
         .expect(StatusCode::FORBIDDEN);
 
