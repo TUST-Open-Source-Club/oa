@@ -31,7 +31,7 @@
 
 ### P0 · 看板体验对齐（先让日常好用）
 
-1. **引入 boards 层**：项目 → 看板 → 列 → 卡片；迁移把现有列挂到默认看板，接口与前端兼容（项目页出现看板切换）。
+1. ✅ **引入 boards 层**：项目 → 看板 → 列 → 卡片；迁移 v5 给每个项目补默认看板，接口与前端兼容（项目页出现看板切换）。
 2. **标签系统**：`labels`（看板级，名称/颜色）+ `card_labels`；卡片上显示标签点/条，详情里勾选。
 3. **筛选与搜索**：按成员/标签/截止（逾期、今天、本周）/关键词过滤，看板顶部状态条。
 4. **卡片详情抽屉**：从 Modal 改为右侧抽屉（保留 URL 直达 `?card=`），含描述、清单、附件、评论、活动流、标签、负责人、时间。
@@ -106,3 +106,15 @@ GET        /tasks/{id}/activity
 2. **实时同步**：WS 推送（体验好、要新增通道与前端重连）还是 2s 游标轮询（简单可靠）
 3. **卡片详情**：右侧抽屉（Planka 风格，改变现有 Modal 交互）还是保留 Modal
 4. **标签与封面**是否都进 P0
+
+## 已完成（P0 第 1 项 · boards 层）
+
+- 迁移 v5：`boards(id, project_id, name, position, archived_at)`；`board_columns.board_id` 回填并置非空；
+- 接口：`GET/POST /projects/{id}/boards`、`PATCH/DELETE /boards/{id}`（删除需空看板）、
+  `GET/POST /boards/{id}/columns`、`GET /boards/{id}/tasks`、`POST /columns/{id}/tasks`；
+  旧 `/projects/{id}/columns` 仍可用，落在默认看板；
+- 前端：项目旁新增看板下拉与「新建看板」，列与任务按看板加载；
+- 测试：`boards_flow.rs` 3 条；task-service 18 条全绿；
+- 截图：`docs/ui-preview/task-boards.png`。
+
+下一步 P0：标签 → 筛选 → 卡片抽屉 → 封面 → 归档。

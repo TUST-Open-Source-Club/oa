@@ -24,6 +24,8 @@ interface ChangeItem { id: string; action: string; actorId: string | null; creat
 const auth = useAuthStore()
 const projects = ref<ProjectItem[]>([])
 const projectId = ref('')
+const boards = ref<Array<{ id: string; name: string; position: number }>>([])
+const boardId = ref('')
 const columns = ref<ColumnItem[]>([])
 const tasks = ref<TaskItem[]>([])
 const users = ref<Record<string, UserItem>>({})
@@ -111,18 +113,53 @@ async function loadProjects() {
   projects.value = await api<ProjectItem[]>('projects')
   const first = projects.value[0]
   if (first && !projectId.value) projectId.value = first.id
-  if (projectId.value) await loadBoard()
+  if (projectId.value) await loadBoards()
 }
 
-/** 加载看板。 */
+/** 加载项目的看板列表（保持当前选择）。 */
+async function loadBoards() {
+  boards.value = await api<Array<{ id: string; name: string; position: number }>>(
+    `projects/${projectId.value}/boards`,
+  )
+  if (!boards.value.some((item) => item.id === boardId.value)) {
+    boardId.value = boards.value[0]?.id ?? ''
+  }
+  await loadBoard()
+}
+
+/** 切换项目。 */
+async function switchProject() {
+  boardId.value = ''
+  await loadBoards()
+}
+
+/** 加载看板（列 + 任务）。 */
 async function loadBoard() {
+  if (!boardId.value) {
+    columns.value = []
+    tasks.value = []
+    return
+  }
   const [cols, list] = await Promise.all([
-    api<ColumnItem[]>(`projects/${projectId.value}/columns`),
-    api<TaskItem[]>(`projects/${projectId.value}/tasks`),
+    api<ColumnItem[]>(`boards/${boardId.value}/columns`),
+    api<TaskItem[]>(`boards/${boardId.value}/tasks`),
   ])
   columns.value = cols
   tasks.value = list
   await resolveUsers(list.flatMap((task) => task.assigneeIds ?? []))
+}
+
+/** 新建看板。 */
+async function createBoard() {
+  const name = window.prompt('看板名称', '新看板')
+  if (!name || !name.trim() || !projectId.value) return
+  const created = await api<{ id: string }>(`projects/${projectId.value}/boards`, {
+    method: 'POST',
+    body: { name: name.trim() },
+  })
+  await loadBoards()
+  boardId.value = created.id
+  await loadBoard()
 }
 
 /** 打开新建弹窗。 */
@@ -362,10 +399,28 @@ onMounted(loadProjects)
         <select
           v-model="projectId"
           class="h-8 rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 text-[13px] font-medium text-[var(--text-strong)] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
-          @change="loadBoard"
+          @change="switchProject"
         >
           <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.name }}</option>
         </select>
+        <select
+          v-if="boards.length"
+          v-model="boardId"
+          class="h-8 rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12px] text-[var(--text-strong)] outline-none focus:border-primary-500"
+          @change="loadBoard"
+        >
+          <option v-for="board in boards" :key="board.id" :value="board.id">
+            {{ board.name }}
+          </option>
+        </select>
+        <button
+          v-if="projectId"
+          class="rounded-[var(--radius-field)] p-1 text-neutral-400 hover:bg-[var(--surface-hover)] hover:text-neutral-600"
+          title="新建看板"
+          @click="createBoard"
+        >
+          <AppIcon name="plus" class="size-4" />
+        </button>
         <span v-if="columns.length" class="text-[11px] text-neutral-400">
           {{ tasks.length }} 个任务 · {{ columns.length }} 列
         </span>

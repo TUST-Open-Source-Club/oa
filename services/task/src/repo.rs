@@ -2,14 +2,14 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder,
-    Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
 
 use club_common::{new_id, AppError};
 
-use crate::entity::{column, comment, project, project_member, subtask, task};
+use crate::entity::{board, column, comment, project, project_member, subtask, task};
 
 /// 数据库错误 → 统一错误。
 pub fn map_db_err(err: DbErr) -> AppError {
@@ -44,6 +44,18 @@ pub async fn create_project(
     .insert(db)
     .await
     .map_err(map_db_err)?;
+    // 默认看板
+    let board = board::ActiveModel {
+        id: Set(new_id()),
+        project_id: Set(model.id),
+        name: Set("默认看板".to_string()),
+        position: Set(0),
+        archived_at: Set(None),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)?;
     // 默认三列：待办 / 进行中 / 已完成
     for (name, position, is_done) in [
         ("待办", 1, false),
@@ -53,6 +65,7 @@ pub async fn create_project(
         column::ActiveModel {
             id: Set(new_id()),
             project_id: Set(model.id),
+            board_id: Set(board.id),
             name: Set(name.to_string()),
             position: Set(position),
             is_done: Set(is_done),
@@ -144,11 +157,12 @@ pub async fn add_member(
 pub async fn create_column(
     db: &DatabaseConnection,
     project_id: Uuid,
+    board_id: Uuid,
     name: &str,
     now: DateTime<Utc>,
 ) -> Result<column::Model, AppError> {
     let max: Option<i64> = column::Entity::find()
-        .filter(column::Column::ProjectId.eq(project_id))
+        .filter(column::Column::BoardId.eq(board_id))
         .order_by_desc(column::Column::Position)
         .one(db)
         .await
@@ -157,6 +171,7 @@ pub async fn create_column(
     column::ActiveModel {
         id: Set(new_id()),
         project_id: Set(project_id),
+        board_id: Set(board_id),
         name: Set(name.to_string()),
         position: Set(max.unwrap_or(0) + 1),
         is_done: Set(false),
@@ -172,8 +187,21 @@ pub async fn list_columns(
     db: &DatabaseConnection,
     project_id: Uuid,
 ) -> Result<Vec<column::Model>, AppError> {
+    // 兼容旧接口：返回默认看板（position 最小）的列
+    let board = default_board(db, project_id).await?;
+    match board {
+        Some(board) => list_columns_by_board(db, board.id).await,
+        None => Ok(Vec::new()),
+    }
+}
+
+/// 看板下的列。
+pub async fn list_columns_by_board(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+) -> Result<Vec<column::Model>, AppError> {
     column::Entity::find()
-        .filter(column::Column::ProjectId.eq(project_id))
+        .filter(column::Column::BoardId.eq(board_id))
         .order_by_asc(column::Column::Position)
         .all(db)
         .await
@@ -670,4 +698,136 @@ pub async fn restore_task(
         updated_at: Set(now.fixed_offset()),
     };
     model.insert(db).await.map_err(map_db_err)
+}
+
+/// 看板列表（不含归档）。
+pub async fn list_boards(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+) -> Result<Vec<board::Model>, AppError> {
+    board::Entity::find()
+        .filter(board::Column::ProjectId.eq(project_id))
+        .filter(board::Column::ArchivedAt.is_null())
+        .order_by_asc(board::Column::Position)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 项目默认看板（position 最小）。
+pub async fn default_board(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+) -> Result<Option<board::Model>, AppError> {
+    board::Entity::find()
+        .filter(board::Column::ProjectId.eq(project_id))
+        .filter(board::Column::ArchivedAt.is_null())
+        .order_by_asc(board::Column::Position)
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 新建看板。
+pub async fn create_board(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+    name: &str,
+    now: DateTime<Utc>,
+) -> Result<board::Model, AppError> {
+    let max: Option<i64> = board::Entity::find()
+        .filter(board::Column::ProjectId.eq(project_id))
+        .order_by_desc(board::Column::Position)
+        .one(db)
+        .await
+        .map_err(map_db_err)?
+        .map(|row| row.position);
+    board::ActiveModel {
+        id: Set(new_id()),
+        project_id: Set(project_id),
+        name: Set(name.to_string()),
+        position: Set(max.unwrap_or(0) + 1),
+        archived_at: Set(None),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}
+
+/// 查找看板。
+pub async fn find_board(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+) -> Result<Option<board::Model>, AppError> {
+    board::Entity::find_by_id(board_id)
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 重命名看板。
+pub async fn rename_board(
+    db: &DatabaseConnection,
+    board: &board::Model,
+    name: &str,
+) -> Result<board::Model, AppError> {
+    let mut active: board::ActiveModel = board.clone().into();
+    active.name = Set(name.to_string());
+    active.update(db).await.map_err(map_db_err)
+}
+
+/// 删除看板（仅空看板）。
+pub async fn delete_board(db: &DatabaseConnection, board_id: Uuid) -> Result<(), AppError> {
+    board::Entity::delete_by_id(board_id)
+        .exec(db)
+        .await
+        .map(|_| ())
+        .map_err(map_db_err)
+}
+
+/// 看板是否还有列。
+pub async fn board_column_count(db: &DatabaseConnection, board_id: Uuid) -> Result<u64, AppError> {
+    column::Entity::find()
+        .filter(column::Column::BoardId.eq(board_id))
+        .count(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 看板下的任务。
+pub async fn list_tasks_by_board(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+) -> Result<Vec<task::Model>, AppError> {
+    let columns = list_columns_by_board(db, board_id).await?;
+    let ids: Vec<Uuid> = columns.iter().map(|column| column.id).collect();
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    task::Entity::find()
+        .filter(task::Column::ColumnId.is_in(ids))
+        .filter(task::Column::Status.ne("terminated"))
+        .order_by_asc(task::Column::Position)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 删除空列（有任务时由调用方拦截）。
+pub async fn delete_column(db: &DatabaseConnection, column_id: Uuid) -> Result<(), AppError> {
+    column::Entity::delete_by_id(column_id)
+        .exec(db)
+        .await
+        .map(|_| ())
+        .map_err(map_db_err)
+}
+
+/// 列内任务数。
+pub async fn column_task_count(db: &DatabaseConnection, column_id: Uuid) -> Result<u64, AppError> {
+    task::Entity::find()
+        .filter(task::Column::ColumnId.eq(column_id))
+        .count(db)
+        .await
+        .map_err(map_db_err)
 }

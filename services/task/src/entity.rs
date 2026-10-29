@@ -32,6 +32,37 @@ pub mod project {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+/// 看板（项目下可多个）。
+pub mod board {
+    use sea_orm::entity::prelude::*;
+
+    /// 看板模型。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "boards")]
+    pub struct Model {
+        /// ID。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: Uuid,
+        /// 所属项目。
+        pub project_id: Uuid,
+        /// 名称。
+        pub name: String,
+        /// 排序。
+        pub position: i64,
+        /// 归档时间。
+        #[sea_orm(nullable)]
+        pub archived_at: Option<DateTimeWithTimeZone>,
+        /// 创建时间。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 /// 项目成员。
 pub mod project_member {
     use sea_orm::entity::prelude::*;
@@ -79,6 +110,8 @@ pub mod column {
         pub project_id: Uuid,
         /// 名称。
         pub name: String,
+        /// 所属看板。
+        pub board_id: Uuid,
         /// 排序。
         pub position: i64,
         /// 是否为完成列。

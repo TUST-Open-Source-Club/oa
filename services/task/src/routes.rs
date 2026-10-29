@@ -13,7 +13,7 @@ use uuid::Uuid;
 use club_auth_sdk::AuthUser;
 use club_common::{new_id, AppError, FieldError};
 
-use crate::entity::{column, comment, project, subtask, task, task_attachment};
+use crate::entity::{board, column, comment, project, subtask, task, task_attachment};
 use crate::repo;
 use crate::state::SharedState;
 
@@ -77,6 +77,8 @@ async fn enqueue_event(
 pub struct ColumnDto {
     /// ID。
     pub id: String,
+    /// 所属看板。
+    pub board_id: String,
     /// 名称。
     pub name: String,
     /// 排序。
@@ -89,6 +91,7 @@ impl From<&column::Model> for ColumnDto {
     fn from(model: &column::Model) -> Self {
         Self {
             id: model.id.to_string(),
+            board_id: model.board_id.to_string(),
             name: model.name.clone(),
             position: model.position,
             is_done: model.is_done,
@@ -238,6 +241,190 @@ pub async fn add_members(
     Ok(Json(json!({ "added": added })))
 }
 
+/// `DELETE /columns/{id}`：删除空列（管理员）。
+pub async fn delete_column(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(column_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let column = repo::find_column(&state.db, column_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_COLUMN_NOT_FOUND", "看板列不存在"))?;
+    repo::ensure_admin(&state.db, column.project_id, user_id).await?;
+    if repo::column_task_count(&state.db, column_id).await? > 0 {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "列里还有任务，无法删除",
+            vec![FieldError::new("columnId", "请先移走任务")],
+        ));
+    }
+    repo::delete_column(&state.db, column_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 看板 DTO。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardDto {
+    /// ID。
+    pub id: String,
+    /// 名称。
+    pub name: String,
+    /// 排序。
+    pub position: i64,
+}
+
+impl From<&board::Model> for BoardDto {
+    fn from(model: &board::Model) -> Self {
+        Self {
+            id: model.id.to_string(),
+            name: model.name.clone(),
+            position: model.position,
+        }
+    }
+}
+
+/// `GET /projects/{id}/boards`：项目看板列表。
+pub async fn list_boards(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(project_id): Path<Uuid>,
+) -> Result<Json<Vec<BoardDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, project_id, user_id).await?;
+    let boards = repo::list_boards(&state.db, project_id).await?;
+    Ok(Json(boards.iter().map(BoardDto::from).collect()))
+}
+
+/// 建看板请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardRequest {
+    /// 名称。
+    pub name: String,
+}
+
+/// `POST /projects/{id}/boards`：新建看板（管理员）。
+pub async fn create_board(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(project_id): Path<Uuid>,
+    Json(input): Json<BoardRequest>,
+) -> Result<(StatusCode, Json<BoardDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_admin(&state.db, project_id, user_id).await?;
+    let name = input.name.trim();
+    if name.is_empty() || name.chars().count() > 64 {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "看板名称需为 1 ~ 64 字符",
+            vec![FieldError::new("name", "非法")],
+        ));
+    }
+    let model = repo::create_board(&state.db, project_id, name, state.now()).await?;
+    Ok((StatusCode::CREATED, Json(BoardDto::from(&model))))
+}
+
+/// 校验看板可访问，返回看板。
+async fn load_board(state: &SharedState, board_id: Uuid) -> Result<board::Model, AppError> {
+    repo::find_board(&state.db, board_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_BOARD_NOT_FOUND", "看板不存在"))
+}
+
+/// `PATCH /boards/{id}`：重命名看板。
+pub async fn rename_board(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+    Json(input): Json<BoardRequest>,
+) -> Result<Json<BoardDto>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_admin(&state.db, board.project_id, user_id).await?;
+    let name = input.name.trim();
+    if name.is_empty() || name.chars().count() > 64 {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "看板名称需为 1 ~ 64 字符",
+            vec![FieldError::new("name", "非法")],
+        ));
+    }
+    let updated = repo::rename_board(&state.db, &board, name).await?;
+    Ok(Json(BoardDto::from(&updated)))
+}
+
+/// `DELETE /boards/{id}`：删除空看板。
+pub async fn delete_board(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_admin(&state.db, board.project_id, user_id).await?;
+    if repo::board_column_count(&state.db, board_id).await? > 0 {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "看板里还有列，无法删除",
+            vec![FieldError::new("boardId", "请先清空看板")],
+        ));
+    }
+    repo::delete_board(&state.db, board_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /boards/{id}/columns`：看板列。
+pub async fn list_board_columns(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+) -> Result<Json<Vec<ColumnDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_member(&state.db, board.project_id, user_id).await?;
+    let columns = repo::list_columns_by_board(&state.db, board_id).await?;
+    Ok(Json(columns.iter().map(ColumnDto::from).collect()))
+}
+
+/// `POST /boards/{id}/columns`：在看板下建列。
+pub async fn create_board_column(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+    Json(input): Json<CreateColumnRequest>,
+) -> Result<(StatusCode, Json<ColumnDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_admin(&state.db, board.project_id, user_id).await?;
+    let name = input.name.trim();
+    if name.is_empty() || name.chars().count() > 64 {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "列名称不合法",
+            vec![FieldError::new("name", "非法")],
+        ));
+    }
+    let model =
+        repo::create_column(&state.db, board.project_id, board.id, name, state.now()).await?;
+    Ok((StatusCode::CREATED, Json(ColumnDto::from(&model))))
+}
+
+/// `GET /boards/{id}/tasks`：看板任务。
+pub async fn list_board_tasks(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_member(&state.db, board.project_id, user_id).await?;
+    let tasks = repo::list_tasks_by_board(&state.db, board_id).await?;
+    let dtos = tasks.iter().map(TaskDto::from).collect::<Vec<_>>();
+    Ok(Json(json!(dtos)))
+}
+
 /// `GET /projects/{id}/columns`。
 pub async fn list_columns(
     State(state): State<SharedState>,
@@ -274,7 +461,10 @@ pub async fn create_column(
             vec![FieldError::new("name", "非法")],
         ));
     }
-    let model = repo::create_column(&state.db, project_id, name, state.now()).await?;
+    let board = repo::default_board(&state.db, project_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_BOARD_NOT_FOUND", "默认看板不存在"))?;
+    let model = repo::create_column(&state.db, project_id, board.id, name, state.now()).await?;
     Ok((StatusCode::CREATED, Json(ColumnDto::from(&model))))
 }
 
@@ -320,8 +510,8 @@ async fn task_dto(state: &SharedState, model: &task::Model) -> Result<TaskDto, A
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTaskRequest {
-    /// 列。
-    pub column_id: Uuid,
+    /// 列（`/columns/{id}/tasks` 通道可省略）。
+    pub column_id: Option<Uuid>,
     /// 标题。
     pub title: String,
     /// 描述。
@@ -339,6 +529,7 @@ pub struct CreateTaskRequest {
 }
 
 /// `POST /projects/{id}/tasks`。
+/// `POST /projects/{id}/tasks`。
 pub async fn create_task(
     State(state): State<SharedState>,
     auth: AuthUser,
@@ -347,6 +538,42 @@ pub async fn create_task(
 ) -> Result<(StatusCode, Json<TaskDto>), AppError> {
     let user_id = user_id_of(&auth)?;
     repo::ensure_member(&state.db, project_id, user_id).await?;
+    let column_id = input.column_id.ok_or_else(|| {
+        AppError::unprocessable(
+            "TASK_VALIDATION",
+            "缺少 columnId",
+            vec![FieldError::new("columnId", "不能为空")],
+        )
+    })?;
+    let column = repo::find_column(&state.db, column_id)
+        .await?
+        .filter(|column| column.project_id == project_id)
+        .ok_or_else(|| AppError::not_found("TASK_COLUMN_NOT_FOUND", "看板列不存在"))?;
+    create_task_core(&state, user_id, project_id, column, input).await
+}
+
+/// `POST /columns/{id}/tasks`：按列创建任务（项目由列推导）。
+pub async fn create_task_in_column(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(column_id): Path<Uuid>,
+    Json(input): Json<CreateTaskRequest>,
+) -> Result<(StatusCode, Json<TaskDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    let column = repo::find_column(&state.db, column_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_COLUMN_NOT_FOUND", "看板列不存在"))?;
+    repo::ensure_member(&state.db, column.project_id, user_id).await?;
+    create_task_core(&state, user_id, column.project_id, column, input).await
+}
+
+async fn create_task_core(
+    state: &SharedState,
+    user_id: Uuid,
+    project_id: Uuid,
+    column: column::Model,
+    input: CreateTaskRequest,
+) -> Result<(StatusCode, Json<TaskDto>), AppError> {
     let title = input.title.trim();
     if title.is_empty() || title.chars().count() > 255 {
         return Err(AppError::unprocessable(
@@ -355,10 +582,6 @@ pub async fn create_task(
             vec![FieldError::new("title", "非法")],
         ));
     }
-    let column = repo::find_column(&state.db, input.column_id)
-        .await?
-        .filter(|column| column.project_id == project_id)
-        .ok_or_else(|| AppError::not_found("TASK_COLUMN_NOT_FOUND", "看板列不存在"))?;
     let priority = input.priority.unwrap_or_else(|| "normal".to_string());
     if !["low", "normal", "high", "urgent"].contains(&priority.as_str()) {
         return Err(AppError::unprocessable(
@@ -392,7 +615,7 @@ pub async fn create_task(
     for assignee in &assignees {
         if *assignee != user_id {
             enqueue_event(
-                &state,
+                state,
                 "task.assigned",
                 user_id,
                 vec![*assignee],
@@ -404,7 +627,7 @@ pub async fn create_task(
             .await;
         }
     }
-    Ok((StatusCode::CREATED, Json(task_dto(&state, &model).await?)))
+    Ok((StatusCode::CREATED, Json(task_dto(state, &model).await?)))
 }
 
 /// 加载任务并校验项目成员。
@@ -1309,7 +1532,19 @@ pub fn router() -> Router<SharedState> {
             "/projects/{id}/columns",
             get(list_columns).post(create_column),
         )
+        .route("/projects/{id}/boards", get(list_boards).post(create_board))
+        .route(
+            "/boards/{id}",
+            axum::routing::patch(rename_board).delete(delete_board),
+        )
+        .route(
+            "/boards/{id}/columns",
+            get(list_board_columns).post(create_board_column),
+        )
+        .route("/boards/{id}/tasks", get(list_board_tasks))
+        .route("/columns/{id}", axum::routing::delete(delete_column))
         .route("/projects/{id}/tasks", get(list_tasks).post(create_task))
+        .route("/columns/{id}/tasks", post(create_task_in_column))
         .route(
             "/tasks/{id}",
             get(get_task).patch(update_task).delete(delete_task),
