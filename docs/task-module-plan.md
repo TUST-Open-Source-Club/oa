@@ -41,8 +41,8 @@
 
 ### P1 · 协作与自动化
 
-8. **看板权限**：`board_members(role: admin/editor/viewer)`，项目管理员可管理；viewer 只读。
-9. **实时同步**：看板变更推送（WS `/ws/task` 或 2s 游标轮询），多人拖拽不互相覆盖。
+8. ✅ **看板权限**：`board_members(role: admin/editor/viewer)`，项目管理员可管理；viewer 只读。
+9. ✅ **实时同步**（轮询增量）：看板变更推送（WS `/ws/task` 或 2s 游标轮询），多人拖拽不互相覆盖。
 10. **通知增强**：到期前提醒（每天一次）、评论 `@` 提及、列变更提醒（可关）。
 11. **模板**：卡片模板、清单模板；「从模板新建卡片」。
 12. **我的任务视图**：按截止/项目/标签分组，日历月视图。
@@ -148,3 +148,17 @@ GET        /tasks/{id}/activity
 截图：`docs/ui-preview/task-drawer-cover.png`。
 
 **P0 全部完成。** 下一步 P1：看板权限、轮询游标实时同步、到期/@ 通知、模板、我的任务视图。
+
+## 已完成（P1 第 1–2 项 · 看板权限 / 轮询增量同步）
+
+- 迁移 v9：`board_members(board_id, user_id, role)`；
+  默认继承项目角色（项目管理员=admin，普通成员=editor），可覆盖为 viewer/editor/admin；
+- `GET/POST /boards/{id}/members`、`DELETE .../{userId}`（仅看板 admin 可管理）；
+  viewer 不能建列/建卡（403），可读；
+- `GET /boards/{id}/sync?since=` 返回 `{ serverTime, tasks }`，只含该时间后变更的卡片
+  （排除归档/终止）；前端 4s 轮询合并，抽屉打开时暂停；
+- 前端：看板成员弹窗（角色下拉 + 恢复继承）。
+
+测试：`board_permissions_flow.rs` 2 条、`sync_flow.rs` 1 条；task-service 27 条全绿。
+
+**P1 剩余**：通知增强（到期提醒、评论 @）、卡片/清单模板、我的任务视图（分组 + 日历）。

@@ -354,3 +354,30 @@ pub mod task_label {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// 看板成员（角色覆盖）。
+pub mod board_member {
+    use sea_orm::entity::prelude::*;
+
+    /// 看板成员模型。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "board_members")]
+    pub struct Model {
+        /// 看板。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub board_id: Uuid,
+        /// 用户。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub user_id: Uuid,
+        /// admin / editor / viewer。
+        pub role: String,
+        /// 加入时间。
+        pub joined_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}

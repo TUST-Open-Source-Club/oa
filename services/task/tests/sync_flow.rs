@@ -97,8 +97,7 @@ async fn sync_returns_only_changed_tasks() {
         None,
     )
     .await;
-    assert!(idle
-        .expect(StatusCode::OK)["tasks"]
+    assert!(idle.expect(StatusCode::OK)["tasks"]
         .as_array()
         .unwrap()
         .is_empty());
@@ -148,8 +147,7 @@ async fn sync_returns_only_changed_tasks() {
         None,
     )
     .await;
-    assert!(after_archive
-        .expect(StatusCode::OK)["tasks"]
+    assert!(after_archive.expect(StatusCode::OK)["tasks"]
         .as_array()
         .unwrap()
         .is_empty());

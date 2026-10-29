@@ -10,8 +10,8 @@ use uuid::Uuid;
 use club_common::{new_id, AppError};
 
 use crate::entity::{
-    board, column, comment, label, project, project_member, subtask, task, task_assignee,
-    task_label,
+    board, board_member, column, comment, label, project, project_member, subtask, task,
+    task_assignee, task_label,
 };
 
 /// 数据库错误 → 统一错误。
@@ -1076,4 +1076,100 @@ pub async fn labels_for_tasks(
         }
     }
     Ok(result)
+}
+
+/// 项目成员列表。
+pub async fn list_project_members(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+) -> Result<Vec<project_member::Model>, AppError> {
+    project_member::Entity::find()
+        .filter(project_member::Column::ProjectId.eq(project_id))
+        .order_by_asc(project_member::Column::JoinedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 看板成员覆盖。
+pub async fn list_board_overrides(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+) -> Result<Vec<board_member::Model>, AppError> {
+    board_member::Entity::find()
+        .filter(board_member::Column::BoardId.eq(board_id))
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 查某人在看板的覆盖角色。
+pub async fn find_board_override(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<board_member::Model>, AppError> {
+    board_member::Entity::find_by_id((board_id, user_id))
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 写入看板成员覆盖。
+pub async fn upsert_board_member(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+    user_id: Uuid,
+    role: &str,
+    now: DateTime<Utc>,
+) -> Result<board_member::Model, AppError> {
+    if let Some(existing) = find_board_override(db, board_id, user_id).await? {
+        let mut active: board_member::ActiveModel = existing.into();
+        active.role = Set(role.to_string());
+        return active.update(db).await.map_err(map_db_err);
+    }
+    board_member::ActiveModel {
+        board_id: Set(board_id),
+        user_id: Set(user_id),
+        role: Set(role.to_string()),
+        joined_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}
+
+/// 删除看板成员覆盖（回到继承）。
+pub async fn delete_board_member(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    board_member::Entity::delete_by_id((board_id, user_id))
+        .exec(db)
+        .await
+        .map(|_| ())
+        .map_err(map_db_err)
+}
+
+/// 看板内自 `since` 之后更新的任务（排除归档/终止）。
+pub async fn list_tasks_updated_since(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+    since: DateTime<Utc>,
+) -> Result<Vec<task::Model>, AppError> {
+    let columns = list_columns_by_board(db, board_id).await?;
+    let ids: Vec<Uuid> = columns.iter().map(|column| column.id).collect();
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    task::Entity::find()
+        .filter(task::Column::ColumnId.is_in(ids))
+        .filter(task::Column::Status.ne("terminated"))
+        .filter(task::Column::ArchivedAt.is_null())
+        .filter(task::Column::UpdatedAt.gt(since.fixed_offset()))
+        .order_by_asc(task::Column::UpdatedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)
 }

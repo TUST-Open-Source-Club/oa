@@ -42,6 +42,10 @@ const archivedOpen = ref(false)
 const archivedTasks = ref<TaskItem[]>([])
 const quickAddTitle = ref('')
 const currentCoverId = ref<string | null>(null)
+const syncCursor = ref('')
+let syncTimer: ReturnType<typeof setInterval> | undefined
+const boardMembersOpen = ref(false)
+const boardMembers = ref<Array<{ userId: string; role: string; inherited: boolean }>>([])
 const coverDraft = ref('')
 const boardId = ref('')
 const columns = ref<ColumnItem[]>([])
@@ -170,6 +174,8 @@ async function loadBoard() {
   ])
   columns.value = cols
   tasks.value = list
+  await refreshCursor()
+  startSyncTimer()
   labels.value = await api<LabelItem[]>(`boards/${boardId.value}/labels`).catch(() => [])
   await resolveUsers(list.flatMap((task) => task.assigneeIds ?? []))
 }
@@ -206,6 +212,68 @@ async function createLabel() {
     body: { name: name.trim(), color },
   })
   labels.value = await api<LabelItem[]>(`boards/${boardId.value}/labels`)
+}
+
+/** 记录当前服务端时间作为增量游标。 */
+async function refreshCursor() {
+  if (!boardId.value) return
+  const snapshot = await api<{ serverTime: string; tasks: TaskItem[] }>(
+    `boards/${boardId.value}/sync`,
+  )
+  mergeTasks(snapshot.tasks)
+  syncCursor.value = snapshot.serverTime
+}
+
+/** 把增量任务合并进列表。 */
+function mergeTasks(incoming: TaskItem[]) {
+  for (const task of incoming) {
+    const index = tasks.value.findIndex((item) => item.id === task.id)
+    if (index >= 0) tasks.value[index] = task
+    else tasks.value.push(task)
+  }
+}
+
+/** 增量轮询（4s），抽屉打开时暂停避免打断编辑。 */
+function startSyncTimer() {
+  clearInterval(syncTimer)
+  syncTimer = setInterval(async () => {
+    if (!boardId.value || taskOpen.value || !syncCursor.value) return
+    try {
+      const result = await api<{ serverTime: string; tasks: TaskItem[] }>(
+        `boards/${boardId.value}/sync`,
+        { params: { since: syncCursor.value } },
+      )
+      mergeTasks(result.tasks)
+      syncCursor.value = result.serverTime
+    } catch {
+      // 轮询失败忽略，下次重试
+    }
+  }, 4000)
+}
+
+/** 打开看板成员设置。 */
+async function openBoardMembers() {
+  if (!boardId.value) return
+  boardMembers.value = await api<Array<{ userId: string; role: string; inherited: boolean }>>(
+    `boards/${boardId.value}/members`,
+  )
+  await resolveUsers(boardMembers.value.map((row) => row.userId))
+  boardMembersOpen.value = true
+}
+
+/** 设置看板角色覆盖。 */
+async function setBoardRole(userId: string, role: string) {
+  await api(`boards/${boardId.value}/members`, {
+    method: 'POST',
+    body: { userId, role },
+  })
+  await openBoardMembers()
+}
+
+/** 删除覆盖（回到继承）。 */
+async function resetBoardRole(userId: string) {
+  await api(`boards/${boardId.value}/members/${userId}`, { method: 'DELETE' })
+  await openBoardMembers()
 }
 
 /** 清空筛选。 */
@@ -562,7 +630,10 @@ onMounted(async () => {
     if (task) openEdit(task)
   }
 })
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+  clearInterval(syncTimer)
+})
 </script>
 
 <template>
@@ -646,6 +717,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       </select>
       <Button variant="ghost" size="sm" @click="clearFilters">清除筛选</Button>
       <Button variant="ghost" size="sm" @click="openArchived">已归档</Button>
+      <Button v-if="boardId" variant="ghost" size="sm" @click="openBoardMembers">看板成员</Button>
     </div>
 
     <p
@@ -999,6 +1071,46 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       </ul>
       <template #footer>
         <Button variant="secondary" @click="archivedOpen = false">关闭</Button>
+      </template>
+    </AppModal>
+
+    <!-- 看板成员 -->
+    <AppModal :open="boardMembersOpen" title="看板成员" @close="boardMembersOpen = false">
+      <table class="w-full text-[12px]">
+        <thead>
+          <tr class="text-left text-[11px] text-neutral-400">
+            <th class="pb-1 font-normal">成员</th>
+            <th class="pb-1 font-normal">角色</th>
+            <th class="pb-1 font-normal"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="member in boardMembers" :key="member.userId" class="border-t border-[var(--border)]">
+            <td class="py-1.5">{{ users[member.userId]?.nickname ?? member.userId }}</td>
+            <td class="py-1.5">
+              <select
+                :value="member.role"
+                class="h-7 rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] px-1 text-[11px]"
+                @change="setBoardRole(member.userId, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="admin">管理员</option>
+                <option value="editor">可编辑</option>
+                <option value="viewer">只读</option>
+              </select>
+            </td>
+            <td class="py-1.5 text-right">
+              <button
+                v-if="!member.inherited"
+                class="text-[11px] text-neutral-400 hover:text-primary-600"
+                @click="resetBoardRole(member.userId)"
+              >恢复继承</button>
+              <span v-else class="text-[10px] text-neutral-300">继承</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <template #footer>
+        <Button variant="secondary" @click="boardMembersOpen = false">关闭</Button>
       </template>
     </AppModal>
 

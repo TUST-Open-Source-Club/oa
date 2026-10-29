@@ -424,6 +424,172 @@ pub async fn detach_label(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// 增量同步参数。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncQuery {
+    /// 上次同步时间（RFC3339）。
+    pub since: Option<String>,
+}
+
+/// `GET /boards/{id}/sync?since=`：看板增量同步（轮询）。
+pub async fn board_sync(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+    Query(query): Query<SyncQuery>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_member(&state.db, board.project_id, user_id).await?;
+    let since = match query.since.as_deref() {
+        Some(raw) => chrono::DateTime::parse_from_rfc3339(raw)
+            .map(|value| value.with_timezone(&chrono::Utc))
+            .map_err(|_| {
+                AppError::unprocessable(
+                    "TASK_VALIDATION",
+                    "since 不是合法时间",
+                    vec![FieldError::new("since", "使用 RFC3339")],
+                )
+            })?,
+        None => state.now() - chrono::Duration::seconds(30),
+    };
+    let tasks = repo::list_tasks_updated_since(&state.db, board_id, since).await?;
+    let mut dtos = Vec::with_capacity(tasks.len());
+    for model in &tasks {
+        dtos.push(task_dto(&state, model).await?);
+    }
+    Ok(Json(json!({
+        "serverTime": state.now().to_rfc3339(),
+        "tasks": dtos,
+    })))
+}
+
+/// 有效看板角色（继承或覆盖）。
+async fn effective_board_role(
+    state: &SharedState,
+    board: &board::Model,
+    user_id: Uuid,
+) -> Result<(crate::entity::project_member::Model, String), AppError> {
+    let member = repo::ensure_member(&state.db, board.project_id, user_id).await?;
+    if member.role == "admin" {
+        return Ok((member, "admin".to_string()));
+    }
+    let role = match repo::find_board_override(&state.db, board.id, user_id).await? {
+        Some(row) => row.role,
+        None => "editor".to_string(),
+    };
+    Ok((member, role))
+}
+
+/// 校验可写（editor/admin）。
+async fn ensure_board_editor(
+    state: &SharedState,
+    board: &board::Model,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    let (_, role) = effective_board_role(state, board, user_id).await?;
+    if role == "viewer" {
+        return Err(AppError::forbidden("TASK_FORBIDDEN", "看板只读，无法修改"));
+    }
+    Ok(())
+}
+
+/// 校验看板管理员。
+async fn ensure_board_admin(
+    state: &SharedState,
+    board: &board::Model,
+    user_id: Uuid,
+) -> Result<(), AppError> {
+    let (_, role) = effective_board_role(state, board, user_id).await?;
+    if role != "admin" {
+        return Err(AppError::forbidden("TASK_FORBIDDEN", "仅看板管理员可操作"));
+    }
+    Ok(())
+}
+
+/// `GET /boards/{id}/members`：看板成员与有效角色。
+pub async fn list_board_members(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_member(&state.db, board.project_id, user_id).await?;
+    let members = repo::list_project_members(&state.db, board.project_id).await?;
+    let overrides = repo::list_board_overrides(&state.db, board_id).await?;
+    let items: Vec<Value> = members
+        .iter()
+        .map(|member| {
+            let overridden = overrides.iter().find(|row| row.user_id == member.user_id);
+            let role = if member.role == "admin" {
+                "admin"
+            } else {
+                overridden.map(|row| row.role.as_str()).unwrap_or("editor")
+            };
+            json!({
+                "userId": member.user_id,
+                "role": role,
+                "inherited": overridden.is_none(),
+            })
+        })
+        .collect();
+    Ok(Json(json!(items)))
+}
+
+/// 看板成员请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardMemberRequest {
+    /// 用户。
+    pub user_id: Uuid,
+    /// editor / viewer / admin。
+    pub role: String,
+}
+
+/// `POST /boards/{id}/members`：设置看板角色覆盖。
+pub async fn set_board_member(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+    Json(input): Json<BoardMemberRequest>,
+) -> Result<(StatusCode, Json<Value>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    ensure_board_admin(&state, &board, user_id).await?;
+    if !["admin", "editor", "viewer"].contains(&input.role.as_str()) {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "看板角色不合法",
+            vec![FieldError::new("role", "仅支持 admin/editor/viewer")],
+        ));
+    }
+    repo::ensure_member(&state.db, board.project_id, input.user_id)
+        .await
+        .map_err(|_| AppError::not_found("TASK_MEMBER_NOT_FOUND", "目标不是项目成员"))?;
+    let row =
+        repo::upsert_board_member(&state.db, board_id, input.user_id, &input.role, state.now())
+            .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "userId": row.user_id, "role": row.role })),
+    ))
+}
+
+/// `DELETE /boards/{id}/members/{user_id}`：删除覆盖（回到继承）。
+pub async fn delete_board_member(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((board_id, target_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    ensure_board_admin(&state, &board, user_id).await?;
+    repo::delete_board_member(&state.db, board_id, target_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// 看板 DTO。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -503,7 +669,7 @@ pub async fn rename_board(
 ) -> Result<Json<BoardDto>, AppError> {
     let user_id = user_id_of(&auth)?;
     let board = load_board(&state, board_id).await?;
-    repo::ensure_admin(&state.db, board.project_id, user_id).await?;
+    ensure_board_admin(&state, &board, user_id).await?;
     let name = input.name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(AppError::unprocessable(
@@ -524,7 +690,7 @@ pub async fn delete_board(
 ) -> Result<StatusCode, AppError> {
     let user_id = user_id_of(&auth)?;
     let board = load_board(&state, board_id).await?;
-    repo::ensure_admin(&state.db, board.project_id, user_id).await?;
+    ensure_board_admin(&state, &board, user_id).await?;
     if repo::board_column_count(&state.db, board_id).await? > 0 {
         return Err(AppError::unprocessable(
             "TASK_VALIDATION",
@@ -558,7 +724,7 @@ pub async fn create_board_column(
 ) -> Result<(StatusCode, Json<ColumnDto>), AppError> {
     let user_id = user_id_of(&auth)?;
     let board = load_board(&state, board_id).await?;
-    repo::ensure_admin(&state.db, board.project_id, user_id).await?;
+    ensure_board_editor(&state, &board, user_id).await?;
     let name = input.name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(AppError::unprocessable(
@@ -800,7 +966,10 @@ pub async fn create_task_in_column(
     let column = repo::find_column(&state.db, column_id)
         .await?
         .ok_or_else(|| AppError::not_found("TASK_COLUMN_NOT_FOUND", "看板列不存在"))?;
-    repo::ensure_member(&state.db, column.project_id, user_id).await?;
+    let board = repo::find_board(&state.db, column.board_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_BOARD_NOT_FOUND", "看板不存在"))?;
+    ensure_board_editor(&state, &board, user_id).await?;
     create_task_core(&state, user_id, column.project_id, column, input).await
 }
 
@@ -1904,9 +2073,18 @@ pub fn router() -> Router<SharedState> {
             get(list_board_columns).post(create_board_column),
         )
         .route("/boards/{id}/tasks", get(list_board_tasks))
+        .route("/boards/{id}/sync", get(board_sync))
         .route("/boards/{id}/archived-tasks", get(list_archived_tasks))
         .route("/tasks/{id}/archive", post(archive_task))
         .route("/tasks/{id}/restore", post(restore_task))
+        .route(
+            "/boards/{id}/members",
+            get(list_board_members).post(set_board_member),
+        )
+        .route(
+            "/boards/{id}/members/{user_id}",
+            axum::routing::delete(delete_board_member),
+        )
         .route("/boards/{id}/labels", get(list_labels).post(create_label))
         .route(
             "/labels/{id}",
