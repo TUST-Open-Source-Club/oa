@@ -39,6 +39,8 @@ pub mod space {
 pub mod space_member {
     use sea_orm::entity::prelude::*;
 
+    /// 空间所有者（唯一）。
+    pub const ROLE_OWNER: &str = "owner";
     /// 管理员。
     pub const ROLE_ADMIN: &str = "admin";
     /// 可编辑。

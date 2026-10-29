@@ -188,10 +188,10 @@ pub async fn delete_space(
 ) -> Result<StatusCode, AppError> {
     let user_id = user_id_of(&auth)?;
     let member = repo::ensure_member(&state.db, space_id, user_id).await?;
-    if member.role != "admin" {
+    if member.role != "owner" {
         return Err(AppError::forbidden(
             "DOC_FORBIDDEN",
-            "仅空间管理员可删除知识库",
+            "仅空间所有者可删除知识库",
         ));
     }
     repo::delete_space(&state.db, space_id).await?;
@@ -238,6 +238,205 @@ fn build_tree(nodes: &[node::Model], parent: Option<Uuid>) -> Value {
         })
         .collect();
     Value::Array(children)
+}
+
+/// 成员 DTO。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberDto {
+    /// 用户 ID。
+    pub user_id: String,
+    /// 角色。
+    pub role: String,
+    /// 加入时间。
+    pub joined_at: DateTime<FixedOffset>,
+}
+
+impl From<&crate::entity::space_member::Model> for MemberDto {
+    fn from(model: &crate::entity::space_member::Model) -> Self {
+        Self {
+            user_id: model.user_id.to_string(),
+            role: model.role.clone(),
+            joined_at: model.joined_at,
+        }
+    }
+}
+
+/// 校验当前用户为 owner/admin，返回成员记录。
+async fn ensure_space_admin(
+    state: &SharedState,
+    space_id: Uuid,
+    user_id: Uuid,
+) -> Result<crate::entity::space_member::Model, AppError> {
+    let member = repo::ensure_member(&state.db, space_id, user_id).await?;
+    if matches!(member.role.as_str(), "owner" | "admin") {
+        Ok(member)
+    } else {
+        Err(AppError::forbidden(
+            "DOC_FORBIDDEN",
+            "仅空间所有者/管理员可操作",
+        ))
+    }
+}
+
+/// `GET /spaces/{id}/members`：成员列表。
+pub async fn list_space_members(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(space_id): Path<Uuid>,
+) -> Result<Json<Vec<MemberDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, space_id, user_id).await?;
+    let members = repo::list_members(&state.db, space_id).await?;
+    Ok(Json(members.iter().map(MemberDto::from).collect()))
+}
+
+/// 邀请/更新成员请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberRequest {
+    /// 用户 ID。
+    pub user_id: Uuid,
+    /// owner/admin/editor/viewer。
+    pub role: String,
+}
+
+/// 校验可分配角色。
+fn validate_role(role: &str) -> Result<(), AppError> {
+    if ["admin", "editor", "viewer"].contains(&role) {
+        Ok(())
+    } else {
+        Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "角色不合法",
+            vec![FieldError::new("role", "仅支持 admin/editor/viewer")],
+        ))
+    }
+}
+
+/// `POST /spaces/{id}/members`：邀请成员（owner/admin）。
+pub async fn invite_member(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(space_id): Path<Uuid>,
+    Json(input): Json<MemberRequest>,
+) -> Result<(StatusCode, Json<MemberDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    let operator = ensure_space_admin(&state, space_id, user_id).await?;
+    validate_role(&input.role)?;
+    if input.role == "admin" && operator.role != "owner" {
+        return Err(AppError::forbidden(
+            "DOC_FORBIDDEN",
+            "仅空间所有者可授予管理员",
+        ));
+    }
+    if input.user_id == user_id {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "不能邀请自己",
+            vec![FieldError::new("userId", "不能邀请自己")],
+        ));
+    }
+    let member =
+        repo::upsert_member(&state.db, space_id, input.user_id, &input.role, state.now()).await?;
+    Ok((StatusCode::CREATED, Json(MemberDto::from(&member))))
+}
+
+/// 调整角色请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRoleRequest {
+    /// 新角色。
+    pub role: String,
+}
+
+/// `PATCH /spaces/{id}/members/{user_id}`：调整成员角色。
+pub async fn update_member_role(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, target_id)): Path<(Uuid, Uuid)>,
+    Json(input): Json<UpdateRoleRequest>,
+) -> Result<Json<MemberDto>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let operator = ensure_space_admin(&state, space_id, user_id).await?;
+    validate_role(&input.role)?;
+    let target = repo::find_member(&state.db, space_id, target_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("DOC_MEMBER_NOT_FOUND", "成员不存在"))?;
+    if (target.role == "owner" || input.role == "admin") && operator.role != "owner" {
+        return Err(AppError::forbidden(
+            "DOC_FORBIDDEN",
+            "仅空间所有者可调整管理员",
+        ));
+    }
+    let member =
+        repo::upsert_member(&state.db, space_id, target_id, &input.role, state.now()).await?;
+    Ok(Json(MemberDto::from(&member)))
+}
+
+/// `DELETE /spaces/{id}/members/{user_id}`：移除成员。
+pub async fn remove_space_member(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, target_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let operator = ensure_space_admin(&state, space_id, user_id).await?;
+    let target = repo::find_member(&state.db, space_id, target_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("DOC_MEMBER_NOT_FOUND", "成员不存在"))?;
+    if target.role == "owner" {
+        return Err(AppError::forbidden(
+            "DOC_FORBIDDEN",
+            "不能移除空间所有者，请先转移所有权",
+        ));
+    }
+    if target.role == "admin" && operator.role != "owner" {
+        return Err(AppError::forbidden(
+            "DOC_FORBIDDEN",
+            "仅空间所有者可移除管理员",
+        ));
+    }
+    repo::remove_member(&state.db, space_id, target_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 转移空间请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferSpaceRequest {
+    /// 新所有者。
+    pub user_id: Uuid,
+}
+
+/// `POST /spaces/{id}/transfer`：转移空间所有权（仅 owner）。
+pub async fn transfer_space(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(space_id): Path<Uuid>,
+    Json(input): Json<TransferSpaceRequest>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let member = repo::ensure_member(&state.db, space_id, user_id).await?;
+    if member.role != "owner" {
+        return Err(AppError::forbidden(
+            "DOC_FORBIDDEN",
+            "仅空间所有者可转移所有权",
+        ));
+    }
+    let space = crate::entity::space::Entity::find_by_id(space_id)
+        .one(&state.db)
+        .await
+        .map_err(AppError::internal)?
+        .ok_or_else(|| AppError::not_found("DOC_SPACE_NOT_FOUND", "空间不存在"))?;
+    let target = repo::find_member(&state.db, space_id, input.user_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("DOC_MEMBER_NOT_FOUND", "目标不是空间成员"))?;
+    if target.role == "owner" {
+        return Ok(Json(json!({ "ownerId": space.owner_id })));
+    }
+    repo::transfer_owner(&state.db, &space, input.user_id, state.now()).await?;
+    Ok(Json(json!({ "ownerId": input.user_id })))
 }
 
 /// 创建节点请求。
@@ -609,7 +808,7 @@ async fn ensure_comment_operator(
         return Ok(());
     }
     let member = repo::ensure_member(&state.db, space_id, user_id).await?;
-    if matches!(member.role.as_str(), "admin" | "editor") {
+    if matches!(member.role.as_str(), "owner" | "admin" | "editor") {
         Ok(())
     } else {
         Err(AppError::forbidden(
@@ -1328,6 +1527,15 @@ pub fn router() -> Router<SharedState> {
         .route("/spaces", get(list_spaces).post(create_space))
         .route("/spaces/{id}", axum::routing::delete(delete_space))
         .route("/spaces/{id}/tree", get(space_tree))
+        .route(
+            "/spaces/{id}/members",
+            get(list_space_members).post(invite_member),
+        )
+        .route(
+            "/spaces/{id}/members/{user_id}",
+            axum::routing::patch(update_member_role).delete(remove_space_member),
+        )
+        .route("/spaces/{id}/transfer", post(transfer_space))
         .route("/spaces/{id}/nodes", post(create_node))
         .route(
             "/spaces/{id}/nodes/{node_id}",

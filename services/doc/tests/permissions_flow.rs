@@ -42,7 +42,9 @@ async fn members_raw(app: &TestApp, token: &str, space_id: &str) -> TestResponse
 }
 
 async fn members(app: &TestApp, token: &str, space_id: &str) -> serde_json::Value {
-    members_raw(app, token, space_id).await.expect(StatusCode::OK)
+    members_raw(app, token, space_id)
+        .await
+        .expect(StatusCode::OK)
 }
 
 async fn invite(

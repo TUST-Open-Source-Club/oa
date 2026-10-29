@@ -24,6 +24,11 @@ interface NodeDetail {
   contentMd: string
   visibility?: string
 }
+interface MemberItem {
+  userId: string
+  role: string
+  joinedAt: string
+}
 interface CommentItem {
   id: string
   parentId: string | null
@@ -89,6 +94,13 @@ const selectedVersion = ref<number | null>(null)
 const versionContent = ref('')
 const versionLoading = ref(false)
 
+const spaceSettingsOpen = ref(false)
+const spaceMembers = ref<MemberItem[]>([])
+const spaceUsers = ref<Record<string, { nickname: string }>>({})
+const inviteIds = ref<string[]>([])
+const inviteRole = ref('viewer')
+const spaceError = ref('')
+
 const commentsOpen = ref(false)
 const comments = ref<CommentItem[]>([])
 const commentsLoading = ref(false)
@@ -135,6 +147,102 @@ async function loadSpaces() {
 /** 加载文档树。 */
 async function loadTree() {
   if (spaceId.value) tree.value = await api<NodeItem[]>(`spaces/${spaceId.value}/tree`)
+}
+
+/** 打开空间设置（成员管理）。 */
+async function openSpaceSettings() {
+  if (!spaceId.value) return
+  spaceSettingsOpen.value = true
+  spaceError.value = ''
+  inviteIds.value = []
+  await loadSpaceMembers()
+}
+
+/** 拉取空间成员与昵称。 */
+async function loadSpaceMembers() {
+  if (!spaceId.value) return
+  try {
+    spaceMembers.value = await api<MemberItem[]>(`spaces/${spaceId.value}/members`)
+    const ids = spaceMembers.value.map((row) => row.userId)
+    if (ids.length) {
+      try {
+        const users = await $fetch<Array<{ id: string; nickname: string }>>('/api/auth/users', {
+          params: { ids: ids.join(',') },
+          headers: auth.authHeaders(),
+        })
+        for (const user of users) spaceUsers.value[user.id] = { nickname: user.nickname }
+      } catch {
+        // 昵称解析失败不影响成员展示
+      }
+    }
+  } catch (error) {
+    spaceError.value = apiErrorMessage(error)
+  }
+}
+
+/** 我的角色。 */
+const mySpaceRole = computed(
+  () => spaceMembers.value.find((row) => row.userId === auth.user?.id)?.role ?? '',
+)
+
+/** 邀请成员。 */
+async function inviteMembers() {
+  if (!spaceId.value || inviteIds.value.length === 0) return
+  spaceError.value = ''
+  try {
+    for (const userId of inviteIds.value) {
+      await api(`spaces/${spaceId.value}/members`, {
+        method: 'POST',
+        body: { userId, role: inviteRole.value },
+      })
+    }
+    inviteIds.value = []
+    await loadSpaceMembers()
+  } catch (error) {
+    spaceError.value = apiErrorMessage(error)
+  }
+}
+
+/** 调整成员角色。 */
+async function changeMemberRole(member: MemberItem, role: string) {
+  spaceError.value = ''
+  try {
+    await api(`spaces/${spaceId.value}/members/${member.userId}`, {
+      method: 'PATCH',
+      body: { role },
+    })
+    await loadSpaceMembers()
+  } catch (error) {
+    spaceError.value = apiErrorMessage(error)
+    await loadSpaceMembers()
+  }
+}
+
+/** 移除成员。 */
+async function removeSpaceMember(member: MemberItem) {
+  if (!window.confirm(`移除成员 ${spaceUsers.value[member.userId]?.nickname ?? member.userId}？`)) return
+  spaceError.value = ''
+  try {
+    await api(`spaces/${spaceId.value}/members/${member.userId}`, { method: 'DELETE' })
+    await loadSpaceMembers()
+  } catch (error) {
+    spaceError.value = apiErrorMessage(error)
+  }
+}
+
+/** 转移所有权。 */
+async function transferSpace(member: MemberItem) {
+  if (!window.confirm('转移所有权后你会降为管理员，确定？')) return
+  spaceError.value = ''
+  try {
+    await api(`spaces/${spaceId.value}/transfer`, {
+      method: 'POST',
+      body: { userId: member.userId },
+    })
+    await loadSpaceMembers()
+  } catch (error) {
+    spaceError.value = apiErrorMessage(error)
+  }
 }
 
 /** 删除当前知识库（仅空间管理员）。 */
@@ -783,11 +891,12 @@ onUnmounted(() => {
           <option v-for="space in spaces" :key="space.id" :value="space.id">{{ space.name }}</option>
         </select>
         <button
-          class="shrink-0 rounded-[var(--radius-field)] p-1.5 text-neutral-400 transition hover:bg-danger-50 hover:text-danger-500 dark:hover:bg-danger-500/10"
-          title="删除知识库"
-          @click="removeSpace"
+          class="shrink-0 rounded-[var(--radius-field)] p-1.5 text-neutral-400 transition hover:bg-[var(--surface-hover)] hover:text-neutral-600"
+          title="空间设置"
+          aria-label="空间设置"
+          @click="openSpaceSettings"
         >
-          <AppIcon name="logout" class="size-4" />
+          <AppIcon name="settings" class="size-4" />
         </button>
       </div>
 
@@ -895,6 +1004,84 @@ onUnmounted(() => {
         @click="deleteNode(treeMenu.node!)"
       >删除</button>
     </div>
+
+    <!-- 空间设置 -->
+    <AppModal :open="spaceSettingsOpen" title="空间设置" width="max-w-lg" @close="spaceSettingsOpen = false">
+      <div class="space-y-4">
+        <div>
+          <h3 class="mb-1.5 text-[11px] font-medium text-neutral-500">成员（{{ spaceMembers.length }}）</h3>
+          <div class="space-y-1">
+            <div
+              v-for="member in spaceMembers"
+              :key="member.userId"
+              class="flex items-center gap-2 rounded-[var(--radius-field)] border border-[var(--border)] px-2.5 py-1.5 text-[12px]"
+            >
+              <UserAvatar :name="spaceUsers[member.userId]?.nickname" :seed="member.userId" size="sm" />
+              <span class="min-w-0 flex-1 truncate text-[var(--text-strong)]">
+                {{ spaceUsers[member.userId]?.nickname ?? member.userId }}
+                <span v-if="member.userId === auth.user?.id" class="ml-1 text-[10px] text-neutral-400">我</span>
+              </span>
+              <span
+                v-if="member.role === 'owner'"
+                class="rounded bg-primary-50 px-1 text-[10px] text-primary-700 dark:bg-primary-900/40 dark:text-primary-200"
+              >所有者</span>
+              <template v-else-if="mySpaceRole === 'owner' || (mySpaceRole === 'admin' && member.role !== 'admin')">
+                <select
+                  :value="member.role"
+                  class="h-7 rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] px-1 text-[11px] text-neutral-600"
+                  @change="changeMemberRole(member, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-if="mySpaceRole === 'owner'" value="admin">管理员</option>
+                  <option value="editor">可编辑</option>
+                  <option value="viewer">只读</option>
+                </select>
+                <button class="text-[11px] text-neutral-400 hover:text-danger-500" @click="removeSpaceMember(member)">
+                  移除
+                </button>
+              </template>
+              <template v-else>
+                <span class="text-[10px] text-neutral-400">
+                  {{ member.role === 'admin' ? '管理员' : member.role === 'editor' ? '可编辑' : '只读' }}
+                </span>
+              </template>
+              <button
+                v-if="mySpaceRole === 'owner' && member.role === 'editor'"
+                class="text-[11px] text-neutral-400 hover:text-primary-600"
+                @click="transferSpace(member)"
+              >
+                设为所有者
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="mySpaceRole === 'owner' || mySpaceRole === 'admin'" class="rounded-[var(--radius-field)] border border-[var(--border)] p-3">
+          <h3 class="mb-1.5 text-[11px] font-medium text-neutral-500">邀请成员</h3>
+          <UserPicker v-model="inviteIds" multiple :exclude-ids="spaceMembers.map((row) => row.userId)" placeholder="搜索并选择成员" />
+          <div class="mt-2 flex items-center gap-2">
+            <select
+              v-model="inviteRole"
+              class="h-8 rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12px]"
+            >
+              <option v-if="mySpaceRole === 'owner'" value="admin">管理员</option>
+              <option value="editor">可编辑</option>
+              <option value="viewer">只读</option>
+            </select>
+            <Button size="sm" :disabled="inviteIds.length === 0" @click="inviteMembers">邀请</Button>
+          </div>
+        </div>
+
+        <p v-if="spaceError" class="text-[11px] text-danger-500">{{ spaceError }}</p>
+
+        <div v-if="mySpaceRole === 'owner'" class="rounded-[var(--radius-field)] border border-danger-500/30 p-3">
+          <p class="text-[12px] text-neutral-500">删除知识库会同时删除其中所有文档，不可恢复。</p>
+          <Button variant="danger" size="sm" class="mt-2" @click="removeSpace">删除知识库</Button>
+        </div>
+      </div>
+      <template #footer>
+        <Button variant="secondary" @click="spaceSettingsOpen = false">关闭</Button>
+      </template>
+    </AppModal>
 
     <!-- 分享 -->
     <AppModal :open="shareOpen" title="分享文档" @close="shareOpen = false">

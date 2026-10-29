@@ -15,7 +15,7 @@
 - [x] 评论：块级锚点（按标题）、回复、解决/未解决；`@` 接 notify 待补
 - [x] 版本 diff（历史版本 ↔ 当前正文）+ 恢复
 - [ ] 关注文档 → 正文变更通知（走 notify 偏好）
-- [ ] 权限细化：空间角色 owner/admin/editor/reader + 文档级覆盖
+- [x] 权限细化：空间角色 owner/admin/editor/viewer + 成员管理/转移所有权（文档级覆盖仍待做）
 
 ## P2 · 进阶
 
@@ -165,3 +165,21 @@ viewer 自动排除 `private`，已删除不出现，按更新时间倒序，返
 
 测试：`services/doc/tests/versions_flow.rs` 2 条 + `utils/text-diff.spec.ts` 6 条。
 截图：`docs/ui-preview/docs-version-diff.png`。
+
+## 已完成（P1 第 3 项 · 权限细化）
+
+- 迁移 v7：既有空间创建者从 `admin` 升级为 `owner`（唯一）；
+- 角色：`owner`（唯一，可删除空间/转移/管理管理员）/ `admin` / `editor` / `viewer`；
+- 新接口：
+  - `GET /spaces/{id}/members`、`POST /spaces/{id}/members`（邀请/改角色，owner/admin）；
+  - `PATCH /spaces/{id}/members/{userId}`、`DELETE .../{userId}`；
+  - `POST /spaces/{id}/transfer`（仅 owner，原 owner 降 admin）；
+- 规则：admin 不能授予/移除 admin、不能动 owner；owner 不能被移除，只能转移；
+  被移除成员立即失去访问；删除空间改为仅 owner。
+- 前端：空间选择器旁的「空间设置」弹窗：成员列表（角色下拉、移除、设为所有者）、
+  邀请（UserPicker + 角色）、危险区删除空间。
+
+测试：`services/doc/tests/permissions_flow.rs` 3 条。
+截图：`docs/ui-preview/docs-space-members.png`。
+
+P1 剩余：关注文档 + 评论/`@` 通知（需给 doc 接 bus/outbox 并在 notify 加 `doc.*` 文案）。

@@ -38,7 +38,7 @@ pub async fn create_space(
     space_member::ActiveModel {
         space_id: Set(model.id),
         user_id: Set(owner_id),
-        role: Set(space_member::ROLE_ADMIN.to_string()),
+        role: Set(space_member::ROLE_OWNER.to_string()),
         joined_at: Set(now.fixed_offset()),
     }
     .insert(db)
@@ -125,7 +125,7 @@ pub async fn ensure_editor(
     let member = ensure_member(db, space_id, user_id).await?;
     if matches!(
         member.role.as_str(),
-        space_member::ROLE_ADMIN | space_member::ROLE_EDITOR
+        space_member::ROLE_OWNER | space_member::ROLE_ADMIN | space_member::ROLE_EDITOR
     ) {
         Ok(member)
     } else {
@@ -535,7 +535,7 @@ pub async fn search_docs(
              JOIN space_members m ON m.space_id = n.space_id AND m.user_id = $1 \
              JOIN spaces s ON s.id = n.space_id \
              WHERE n.deleted_at IS NULL AND n.kind = 'page' \
-               AND (m.role IN ('admin', 'editor') OR n.visibility <> 'private') \
+               AND (m.role IN ('owner', 'admin', 'editor') OR n.visibility <> 'private') \
                AND (n.title ILIKE $2 OR n.content_md ILIKE $2) \
              ORDER BY n.updated_at DESC \
              LIMIT $3",
@@ -725,4 +725,83 @@ pub async fn delete_comment_tree(
         .await
         .map_err(map_db_err)?;
     Ok(result.rows_affected)
+}
+
+/// 列出空间成员。
+pub async fn list_members(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+) -> Result<Vec<space_member::Model>, AppError> {
+    space_member::Entity::find()
+        .filter(space_member::Column::SpaceId.eq(space_id))
+        .order_by_asc(space_member::Column::JoinedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 按用户查成员。
+pub async fn find_member(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<space_member::Model>, AppError> {
+    space_member::Entity::find_by_id((space_id, user_id))
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 邀请/更新成员角色。
+pub async fn upsert_member(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    user_id: Uuid,
+    role: &str,
+    now: DateTime<Utc>,
+) -> Result<space_member::Model, AppError> {
+    if let Some(member) = find_member(db, space_id, user_id).await? {
+        let mut active: space_member::ActiveModel = member.into();
+        active.role = Set(role.to_string());
+        return active.update(db).await.map_err(map_db_err);
+    }
+    space_member::ActiveModel {
+        space_id: Set(space_id),
+        user_id: Set(user_id),
+        role: Set(role.to_string()),
+        joined_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}
+
+/// 移除成员。
+pub async fn remove_member(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, AppError> {
+    let result = space_member::Entity::delete_by_id((space_id, user_id))
+        .exec(db)
+        .await
+        .map_err(map_db_err)?;
+    Ok(result.rows_affected > 0)
+}
+
+/// 转移空间所有权：原 owner 降为 admin，目标升为 owner。
+pub async fn transfer_owner(
+    db: &DatabaseConnection,
+    space: &space::Model,
+    new_owner: Uuid,
+    now: DateTime<Utc>,
+) -> Result<(), AppError> {
+    if space.owner_id == new_owner {
+        return Ok(());
+    }
+    upsert_member(db, space.id, space.owner_id, space_member::ROLE_ADMIN, now).await?;
+    upsert_member(db, space.id, new_owner, space_member::ROLE_OWNER, now).await?;
+    let mut active: space::ActiveModel = space.clone().into();
+    active.owner_id = Set(new_owner);
+    active.update(db).await.map(|_| ()).map_err(map_db_err)
 }
