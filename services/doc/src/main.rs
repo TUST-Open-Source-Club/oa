@@ -55,10 +55,19 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("数据库迁移失败")?;
 
+    let bus = match &config.redis_url {
+        Some(url) => Some(
+            club_bus::Bus::connect(url)
+                .await
+                .context("连接 Redis 失败")?,
+        ),
+        None => None,
+    };
     let state = SharedState::new(AppState {
         db: database,
         config,
         signing_key: RwLock::new(None),
+        bus,
     });
     load_jwks_with_retry(&state).await?;
 

@@ -238,3 +238,86 @@ pub mod node_comment {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// 文档关注。
+pub mod node_follow {
+    use sea_orm::entity::prelude::*;
+
+    /// 关注记录（用户 + 文档 联合主键）。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "node_follows")]
+    pub struct Model {
+        /// 关注者。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub user_id: Uuid,
+        /// 文档节点。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub node_id: Uuid,
+        /// 关注时间。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+/// 文档阅读记录（用户 × 文档 去重）。
+pub mod node_view {
+    use sea_orm::entity::prelude::*;
+
+    /// 阅读记录。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "node_views")]
+    pub struct Model {
+        /// 用户。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub user_id: Uuid,
+        /// 文档节点。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub node_id: Uuid,
+        /// 空间。
+        pub space_id: Uuid,
+        /// 最近浏览时间。
+        pub viewed_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+/// 文档模板。
+pub mod doc_template {
+    use sea_orm::entity::prelude::*;
+
+    /// 模板模型。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "doc_templates")]
+    pub struct Model {
+        /// ID。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: Uuid,
+        /// 所属空间。
+        pub space_id: Uuid,
+        /// 模板名称。
+        pub name: String,
+        /// 正文。
+        #[sea_orm(column_type = "Text")]
+        pub content_md: String,
+        /// 创建者。
+        pub created_by: Uuid,
+        /// 创建时间。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}

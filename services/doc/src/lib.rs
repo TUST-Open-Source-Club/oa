@@ -22,6 +22,8 @@ pub mod config {
         pub issuer: String,
         /// 内部服务密钥（媒体签名等）。
         pub internal_secret: String,
+        /// Redis 连接串（配置后投递 outbox 事件）。
+        pub redis_url: Option<String>,
     }
 
     impl Config {
@@ -51,6 +53,7 @@ pub mod config {
                     .get("INTERNAL_SERVICE_SECRET")
                     .cloned()
                     .unwrap_or_else(|| "dev-internal-secret".to_string()),
+                redis_url: map.get("REDIS_URL").cloned(),
             })
         }
     }
@@ -105,6 +108,8 @@ pub mod state {
         pub config: Config,
         /// JWKS 解码 key。
         pub signing_key: RwLock<Option<DecodingKey>>,
+        /// 事件总线（未配置 Redis 时为空）。
+        pub bus: Option<club_bus::Bus>,
     }
 
     impl AppState {
@@ -168,12 +173,16 @@ pub mod state {
 
 pub mod entity;
 pub mod migration;
+pub mod migration10;
+pub mod migration11;
 pub mod migration2;
 pub mod migration3;
 pub mod migration4;
 pub mod migration5;
 pub mod migration6;
 pub mod migration7;
+pub mod migration8;
+pub mod migration9;
 pub mod repo;
 /// HTTP 路由。
 pub mod routes;

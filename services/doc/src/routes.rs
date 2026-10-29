@@ -513,6 +513,10 @@ pub async fn get_node(
     if model.visibility == "private" && member.role == "viewer" {
         return Err(AppError::forbidden("DOC_FORBIDDEN", "该文档仅编辑者可见"));
     }
+    if model.kind == node::KIND_PAGE {
+        repo::record_view(&state.db, space_id, node_id, user_id, state.now()).await?;
+    }
+    let view_count = repo::view_count(&state.db, node_id).await?;
     Ok(Json(json!({
         "id": model.id,
         "kind": model.kind,
@@ -520,6 +524,7 @@ pub async fn get_node(
         "version": model.version,
         "contentMd": model.content_md,
         "visibility": model.visibility,
+        "viewCount": view_count,
         "updatedAt": model.updated_at
     })))
 }
@@ -667,6 +672,267 @@ pub async fn download_file(
         .into_response())
 }
 
+/// 模板 DTO。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateDto {
+    /// ID。
+    pub id: String,
+    /// 名称。
+    pub name: String,
+    /// 正文。
+    pub content_md: String,
+    /// 创建时间。
+    pub created_at: DateTime<FixedOffset>,
+}
+
+impl From<&crate::entity::doc_template::Model> for TemplateDto {
+    fn from(model: &crate::entity::doc_template::Model) -> Self {
+        Self {
+            id: model.id.to_string(),
+            name: model.name.clone(),
+            content_md: model.content_md.clone(),
+            created_at: model.created_at,
+        }
+    }
+}
+
+/// 新建模板请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTemplateRequest {
+    /// 名称。
+    pub name: String,
+    /// 正文。
+    pub content_md: String,
+}
+
+/// `GET /spaces/{id}/templates`：模板列表。
+pub async fn list_templates(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(space_id): Path<Uuid>,
+) -> Result<Json<Vec<TemplateDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, space_id, user_id).await?;
+    let templates = repo::list_templates(&state.db, space_id).await?;
+    Ok(Json(templates.iter().map(TemplateDto::from).collect()))
+}
+
+/// `POST /spaces/{id}/templates`：新建模板（编辑者）。
+pub async fn create_template(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(space_id): Path<Uuid>,
+    Json(input): Json<CreateTemplateRequest>,
+) -> Result<(StatusCode, Json<TemplateDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_editor(&state.db, space_id, user_id).await?;
+    let name = input.name.trim();
+    if name.is_empty() || name.chars().count() > 64 {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "模板名称不合法",
+            vec![FieldError::new("name", "1~64 字")],
+        ));
+    }
+    if input.content_md.trim().is_empty() || input.content_md.chars().count() > 200_000 {
+        return Err(AppError::unprocessable(
+            "DOC_VALIDATION",
+            "模板正文不合法",
+            vec![FieldError::new("contentMd", "不能为空且不超过 20 万字")],
+        ));
+    }
+    let model = repo::insert_template(
+        &state.db,
+        space_id,
+        name,
+        &input.content_md,
+        user_id,
+        state.now(),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(TemplateDto::from(&model))))
+}
+
+/// `DELETE /templates/{id}`：删除模板（编辑者）。
+pub async fn delete_template(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(template_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let template = repo::find_template(&state.db, template_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("DOC_TEMPLATE_NOT_FOUND", "模板不存在"))?;
+    repo::ensure_editor(&state.db, template.space_id, user_id).await?;
+    repo::delete_template(&state.db, template_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 从模板建页请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FromTemplateRequest {
+    /// 模板 ID。
+    pub template_id: Uuid,
+    /// 标题（缺省用模板名）。
+    pub title: Option<String>,
+    /// 父节点。
+    pub parent_id: Option<Uuid>,
+}
+
+/// `POST /spaces/{id}/nodes/from-template`：用模板创建页面。
+pub async fn create_from_template(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(space_id): Path<Uuid>,
+    Json(input): Json<FromTemplateRequest>,
+) -> Result<(StatusCode, Json<NodeDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_editor(&state.db, space_id, user_id).await?;
+    let template = repo::find_template(&state.db, input.template_id)
+        .await?
+        .filter(|item| item.space_id == space_id)
+        .ok_or_else(|| AppError::not_found("DOC_TEMPLATE_NOT_FOUND", "模板不存在"))?;
+    if let Some(parent_id) = input.parent_id {
+        let parent = repo::find_node(&state.db, parent_id)
+            .await?
+            .filter(|item| item.space_id == space_id && item.deleted_at.is_none())
+            .ok_or_else(|| AppError::not_found("DOC_NODE_NOT_FOUND", "父节点不存在"))?;
+        if parent.kind != node::KIND_FOLDER {
+            return Err(AppError::unprocessable(
+                "DOC_VALIDATION",
+                "父节点必须是文件夹",
+                vec![FieldError::new("parentId", "必须是文件夹")],
+            ));
+        }
+    }
+    let title = input
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| template.name.clone());
+    let model = repo::create_page_with_content(
+        &state.db,
+        space_id,
+        input.parent_id,
+        &title,
+        &template.content_md,
+        user_id,
+        state.now(),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(NodeDto::from(&model))))
+}
+
+/// 最近浏览参数。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentQuery {
+    /// 条数。
+    pub limit: Option<u64>,
+}
+
+/// `GET /recent`：我最近浏览的页面。
+pub async fn recent_views(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    axum::extract::Query(query): axum::extract::Query<RecentQuery>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let limit = query.limit.unwrap_or(8).clamp(1, 50);
+    let rows = repo::list_recent_views(&state.db, user_id, limit).await?;
+    Ok(Json(json!(rows
+        .iter()
+        .map(|row| json!({
+            "id": row.id,
+            "spaceId": row.space_id,
+            "spaceName": row.space_name,
+            "title": row.title,
+            "viewedAt": row.viewed_at,
+        }))
+        .collect::<Vec<_>>())))
+}
+
+/// `POST /spaces/{id}/nodes/{node_id}/follow`：切换关注。
+pub async fn toggle_follow(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, space_id, user_id).await?;
+    load_node(&state, space_id, node_id).await?;
+    let following = repo::toggle_follow(&state.db, node_id, user_id, state.now()).await?;
+    Ok(Json(json!({ "following": following })))
+}
+
+/// `GET /spaces/{id}/nodes/{node_id}/follow`：是否关注。
+pub async fn follow_status(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, space_id, user_id).await?;
+    load_node(&state, space_id, node_id).await?;
+    let following = repo::is_following(&state.db, node_id, user_id).await?;
+    Ok(Json(json!({ "following": following })))
+}
+
+/// 写一条文档通知事件到 outbox（投递由后台任务负责）。
+async fn enqueue_doc_event(
+    state: &SharedState,
+    event_type: &str,
+    actor: Uuid,
+    node: &node::Model,
+    targets: Vec<Uuid>,
+    title: String,
+    body: String,
+) {
+    if targets.is_empty() {
+        return;
+    }
+    let payload = json!({
+        "id": club_common::new_id(),
+        "type": event_type,
+        "actorId": actor,
+        "targetUsers": targets,
+        "resource": { "type": "doc", "id": node.id, "url": "/docs" },
+        "title": title,
+        "body": body,
+        "priority": "default",
+    });
+    if let Err(err) = club_bus::outbox::enqueue(&state.db, event_type, &payload, state.now()).await
+    {
+        tracing::warn!(error = %err, "文档事件写入 outbox 失败");
+    }
+}
+
+/// 计算文档事件的接收人：作者 + 关注者 − 操作者。
+async fn doc_event_targets(
+    state: &SharedState,
+    node: &node::Model,
+    actor: Uuid,
+    extra: Option<Uuid>,
+) -> Vec<Uuid> {
+    let mut targets: Vec<Uuid> = Vec::new();
+    targets.push(node.updated_by);
+    if let Some(extra) = extra {
+        targets.push(extra);
+    }
+    if let Ok(followers) = repo::list_followers(&state.db, node.id).await {
+        targets.extend(followers);
+    }
+    targets.retain(|id| *id != actor);
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
 /// 评论 DTO。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -786,6 +1052,27 @@ pub async fn create_comment(
         state.now(),
     )
     .await?;
+    // 通知：文档作者、关注者、被回复者（排除评论者自己）
+    let node = repo::find_node(&state.db, node_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("DOC_NODE_NOT_FOUND", "节点不存在"))?;
+    let parent_author = match input.parent_id {
+        Some(parent_id) => repo::find_comment(&state.db, parent_id)
+            .await?
+            .map(|comment| comment.author_id),
+        None => None,
+    };
+    let targets = doc_event_targets(&state, &node, user_id, parent_author).await;
+    enqueue_doc_event(
+        &state,
+        "doc.comment.created",
+        user_id,
+        &node,
+        targets,
+        format!("新评论：《{}》", node.title),
+        body.chars().take(80).collect(),
+    )
+    .await;
     Ok((StatusCode::CREATED, Json(CommentDto::from(&model))))
 }
 
@@ -1441,6 +1728,17 @@ pub async fn update_content(
         state.now(),
     )
     .await?;
+    let targets = doc_event_targets(&state, &model, user_id, None).await;
+    enqueue_doc_event(
+        &state,
+        "doc.updated",
+        user_id,
+        &model,
+        targets,
+        format!("文档更新：《{}》", model.title),
+        "正文已更新".to_string(),
+    )
+    .await;
     let _ = club_bus::audit::record(
         &state.db,
         "doc_node",
@@ -1565,6 +1863,20 @@ pub fn router() -> Router<SharedState> {
             get(get_share).post(create_share).delete(delete_share),
         )
         .route("/public/{token}", get(public_doc))
+        .route(
+            "/spaces/{id}/nodes/{node_id}/follow",
+            get(follow_status).post(toggle_follow),
+        )
+        .route("/recent", get(recent_views))
+        .route(
+            "/spaces/{id}/templates",
+            get(list_templates).post(create_template),
+        )
+        .route("/templates/{id}", axum::routing::delete(delete_template))
+        .route(
+            "/spaces/{id}/nodes/from-template",
+            post(create_from_template),
+        )
         .route("/search", get(search_docs))
         .route("/spaces/{id}/nodes/{node_id}/export", get(export_node))
         .route("/spaces/{id}/import", post(import_markdown))

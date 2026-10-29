@@ -4,13 +4,15 @@ use chrono::{DateTime, Utc};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, DbErr,
-    EntityTrait, QueryFilter, QueryOrder, Set, Statement,
+    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set, Statement,
 };
 use uuid::Uuid;
 
 use club_common::{new_id, AppError};
 
-use crate::entity::{node, node_comment, space, space_member, version};
+use crate::entity::{
+    doc_template, node, node_comment, node_follow, node_view, space, space_member, version,
+};
 
 /// 数据库错误 → 统一错误。
 pub fn map_db_err(err: DbErr) -> AppError {
@@ -804,4 +806,211 @@ pub async fn transfer_owner(
     let mut active: space::ActiveModel = space.clone().into();
     active.owner_id = Set(new_owner);
     active.update(db).await.map(|_| ()).map_err(map_db_err)
+}
+
+/// 切换关注状态，返回切换后是否关注。
+pub async fn toggle_follow(
+    db: &DatabaseConnection,
+    node_id: Uuid,
+    user_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<bool, AppError> {
+    let existing = node_follow::Entity::find_by_id((user_id, node_id))
+        .one(db)
+        .await
+        .map_err(map_db_err)?;
+    if existing.is_some() {
+        node_follow::Entity::delete_by_id((user_id, node_id))
+            .exec(db)
+            .await
+            .map_err(map_db_err)?;
+        return Ok(false);
+    }
+    node_follow::ActiveModel {
+        user_id: Set(user_id),
+        node_id: Set(node_id),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)?;
+    Ok(true)
+}
+
+/// 是否关注。
+pub async fn is_following(
+    db: &DatabaseConnection,
+    node_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, AppError> {
+    Ok(node_follow::Entity::find_by_id((user_id, node_id))
+        .one(db)
+        .await
+        .map_err(map_db_err)?
+        .is_some())
+}
+
+/// 文档关注者。
+pub async fn list_followers(db: &DatabaseConnection, node_id: Uuid) -> Result<Vec<Uuid>, AppError> {
+    Ok(node_follow::Entity::find()
+        .filter(node_follow::Column::NodeId.eq(node_id))
+        .all(db)
+        .await
+        .map_err(map_db_err)?
+        .into_iter()
+        .map(|row| row.user_id)
+        .collect())
+}
+
+/// 记录一次浏览（按用户去重，更新最近时间）。
+pub async fn record_view(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    node_id: Uuid,
+    user_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<(), AppError> {
+    let existing = node_view::Entity::find_by_id((user_id, node_id))
+        .one(db)
+        .await
+        .map_err(map_db_err)?;
+    match existing {
+        Some(view) => {
+            let mut active: node_view::ActiveModel = view.into();
+            active.viewed_at = Set(now.fixed_offset());
+            active.space_id = Set(space_id);
+            active.update(db).await.map_err(map_db_err)?;
+        }
+        None => {
+            node_view::ActiveModel {
+                user_id: Set(user_id),
+                node_id: Set(node_id),
+                space_id: Set(space_id),
+                viewed_at: Set(now.fixed_offset()),
+            }
+            .insert(db)
+            .await
+            .map_err(map_db_err)?;
+        }
+    }
+    Ok(())
+}
+
+/// 文档浏览人数。
+pub async fn view_count(db: &DatabaseConnection, node_id: Uuid) -> Result<i64, AppError> {
+    node_view::Entity::find()
+        .filter(node_view::Column::NodeId.eq(node_id))
+        .count(db)
+        .await
+        .map(|count| count as i64)
+        .map_err(map_db_err)
+}
+
+/// 最近浏览行。
+#[derive(Debug, Clone)]
+pub struct RecentView {
+    /// 节点 ID。
+    pub id: Uuid,
+    /// 空间 ID。
+    pub space_id: Uuid,
+    /// 空间名称。
+    pub space_name: String,
+    /// 标题。
+    pub title: String,
+    /// 最近浏览时间。
+    pub viewed_at: DateTime<Utc>,
+}
+
+/// 我最近浏览的页面（排除已删除、已退出空间）。
+pub async fn list_recent_views(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    limit: u64,
+) -> Result<Vec<RecentView>, AppError> {
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT n.id, n.space_id, s.name, n.title, v.viewed_at \
+             FROM node_views v \
+             JOIN nodes n ON n.id = v.node_id \
+             JOIN spaces s ON s.id = n.space_id \
+             JOIN space_members m ON m.space_id = n.space_id AND m.user_id = v.user_id \
+             WHERE v.user_id = $1 AND n.deleted_at IS NULL \
+             ORDER BY v.viewed_at DESC \
+             LIMIT $2",
+            vec![
+                sea_orm::sea_query::Value::Uuid(Some(user_id)),
+                sea_orm::sea_query::Value::BigInt(Some(limit as i64)),
+            ],
+        ))
+        .await
+        .map_err(map_db_err)?;
+    let mut result = Vec::with_capacity(rows.len());
+    for row in rows {
+        result.push(RecentView {
+            id: row.try_get_by_index(0).map_err(map_db_err)?,
+            space_id: row.try_get_by_index(1).map_err(map_db_err)?,
+            space_name: row.try_get_by_index(2).map_err(map_db_err)?,
+            title: row.try_get_by_index(3).map_err(map_db_err)?,
+            viewed_at: row
+                .try_get_by_index::<DateTime<Utc>>(4)
+                .map_err(map_db_err)?,
+        });
+    }
+    Ok(result)
+}
+
+/// 新建模板。
+pub async fn insert_template(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+    name: &str,
+    content_md: &str,
+    created_by: Uuid,
+    now: DateTime<Utc>,
+) -> Result<doc_template::Model, AppError> {
+    doc_template::ActiveModel {
+        id: Set(new_id()),
+        space_id: Set(space_id),
+        name: Set(name.to_string()),
+        content_md: Set(content_md.to_string()),
+        created_by: Set(created_by),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}
+
+/// 空间模板列表。
+pub async fn list_templates(
+    db: &DatabaseConnection,
+    space_id: Uuid,
+) -> Result<Vec<doc_template::Model>, AppError> {
+    doc_template::Entity::find()
+        .filter(doc_template::Column::SpaceId.eq(space_id))
+        .order_by_desc(doc_template::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 按 ID 查模板。
+pub async fn find_template(
+    db: &DatabaseConnection,
+    template_id: Uuid,
+) -> Result<Option<doc_template::Model>, AppError> {
+    doc_template::Entity::find_by_id(template_id)
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 删除模板。
+pub async fn delete_template(db: &DatabaseConnection, template_id: Uuid) -> Result<u64, AppError> {
+    let result = doc_template::Entity::delete_by_id(template_id)
+        .exec(db)
+        .await
+        .map_err(map_db_err)?;
+    Ok(result.rows_affected)
 }

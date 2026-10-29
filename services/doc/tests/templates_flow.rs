@@ -212,9 +212,5 @@ async fn template_permissions_and_validation() {
         None,
     )
     .await;
-    assert!(listed
-        .expect(StatusCode::OK)
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(listed.expect(StatusCode::OK).as_array().unwrap().is_empty());
 }

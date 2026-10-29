@@ -14,13 +14,14 @@
 
 - [x] 评论：块级锚点（按标题）、回复、解决/未解决；`@` 接 notify 待补
 - [x] 版本 diff（历史版本 ↔ 当前正文）+ 恢复
-- [ ] 关注文档 → 正文变更通知（走 notify 偏好）
+- [x] 关注文档 → 正文变更/评论通知（outbox → notify 偏好）
 - [x] 权限细化：空间角色 owner/admin/editor/viewer + 成员管理/转移所有权（文档级覆盖仍待做）
 
 ## P2 · 进阶
 
-- [ ] 实时协同编辑（Yjs/CRDT + `/ws/doc`），单独评估
-- [ ] 模板、反向链接、阅读/编辑统计、导出归档
+- [x] 实时协同编辑评估：**暂不做 CRDT**（结论见下）
+- [x] 模板、阅读统计/最近浏览；反向链接与协同评估见下
+- [ ] 反向链接（待做）
 
 ## 数据模型增量
 
@@ -183,3 +184,30 @@ viewer 自动排除 `private`，已删除不出现，按更新时间倒序，返
 截图：`docs/ui-preview/docs-space-members.png`。
 
 P1 剩余：关注文档 + 评论/`@` 通知（需给 doc 接 bus/outbox 并在 notify 加 `doc.*` 文案）。
+
+## 已完成（P1 第 4 项 · 关注与通知）
+
+- 迁移 v8：outbox 表；迁移 v9：`node_follows`；
+- `POST/GET /spaces/{id}/nodes/{nodeId}/follow`：关注切换与状态；
+- 评论与正文更新写 outbox：`doc.comment.created` / `doc.updated`，
+  接收人 = 文档作者 + 关注者 + 被回复者 − 操作者，payload 与 notify 事件信封一致
+  （notify 侧无需改动，`module()` 自动取 `doc`）；
+- 前端：文档顶栏「关注」星标，关注后变实心。
+
+测试：`services/doc/tests/follows_flow.rs` 3 条（含 outbox 事件断言）。
+
+## 已完成（P2 · 阅读统计 / 最近浏览 / 模板）
+
+- 迁移 v10：`node_views`（按用户去重）；详情返回 `viewCount`；
+  `GET /recent` 返回我最近浏览（排除已删除/已退出空间）；前端侧栏「最近浏览」+ 标题下浏览人数；
+- 迁移 v11：`doc_templates`；`GET/POST /spaces/{id}/templates`、`DELETE /templates/{id}`、
+  `POST /spaces/{id}/nodes/from-template`；前端新建弹窗可选模板、「更多 → 存为模板」；
+- 测试：`recent_flow.rs` 3 条、`templates_flow.rs` 2 条。
+
+## P2 评估结论
+
+- **实时协同（CRDT/Yjs）**：暂不做。现有 `baseVersion` 乐观锁 + 409 冲突提示已能防止静默覆盖；
+  真正的多人协同需要引入 CRDT/WS 基础设施与离线合并策略，成本远大于当前收益。
+  若后续要做，建议单独立项（Yjs + `/ws/doc` + 快照持久化）。
+- **反向链接**：待做。需要约定内链语法（如 `[[标题]]`），在保存时解析并落 `doc_links` 表。
+- **导出归档**：单篇导出已完成；空间级批量导出（zip）暂不做。

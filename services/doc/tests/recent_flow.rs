@@ -162,9 +162,5 @@ async fn deleted_docs_drop_out_of_recent() {
         None,
     )
     .await;
-    assert!(recent
-        .expect(StatusCode::OK)
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(recent.expect(StatusCode::OK).as_array().unwrap().is_empty());
 }

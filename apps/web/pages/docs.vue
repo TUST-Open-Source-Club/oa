@@ -23,6 +23,20 @@ interface NodeDetail {
   version: number
   contentMd: string
   visibility?: string
+  viewCount?: number
+}
+interface TemplateItem {
+  id: string
+  name: string
+  contentMd: string
+  createdAt: string
+}
+interface RecentItem {
+  id: string
+  spaceId: string
+  spaceName: string
+  title: string
+  viewedAt: string
 }
 interface MemberItem {
   userId: string
@@ -101,6 +115,10 @@ const inviteIds = ref<string[]>([])
 const inviteRole = ref('viewer')
 const spaceError = ref('')
 
+const following = ref(false)
+const recentViews = ref<RecentItem[]>([])
+const templates = ref<TemplateItem[]>([])
+const createTemplateId = ref('')
 const commentsOpen = ref(false)
 const comments = ref<CommentItem[]>([])
 const commentsLoading = ref(false)
@@ -147,6 +165,57 @@ async function loadSpaces() {
 /** 加载文档树。 */
 async function loadTree() {
   if (spaceId.value) tree.value = await api<NodeItem[]>(`spaces/${spaceId.value}/tree`)
+}
+
+/** 加载最近浏览。 */
+async function loadRecent() {
+  try {
+    recentViews.value = await api<RecentItem[]>('recent', { params: { limit: 6 } })
+  } catch {
+    recentViews.value = []
+  }
+}
+
+/** 打开最近浏览项（必要时切换空间）。 */
+async function openRecent(item: RecentItem) {
+  if (item.spaceId !== spaceId.value) {
+    spaceId.value = item.spaceId
+    await loadTree()
+  }
+  await openPage({ id: item.id, parentId: null, kind: 'page', title: item.title, version: 1 })
+}
+
+/** 把当前文档正文存为空间模板。 */
+async function saveAsTemplate() {
+  moreOpen.value = false
+  if (!current.value) return
+  const name = window.prompt('模板名称', `${current.value.title} 模板`)
+  if (!name || !name.trim()) return
+  errorMessage.value = ''
+  try {
+    const content = editorRef.value?.getMarkdown?.() ?? draft.value
+    await api(`spaces/${spaceId.value}/templates`, {
+      method: 'POST',
+      body: { name: name.trim(), contentMd: content },
+    })
+    savedTip.value = '已存为模板'
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error, '存为模板失败')
+  }
+}
+
+/** 关注/取消关注当前文档。 */
+async function toggleFollow() {
+  if (!current.value) return
+  try {
+    const result = await api<{ following: boolean }>(
+      `spaces/${spaceId.value}/nodes/${current.value.id}/follow`,
+      { method: 'POST' },
+    )
+    following.value = result.following
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  }
 }
 
 /** 打开空间设置（成员管理）。 */
@@ -278,6 +347,12 @@ async function openPage(node: NodeItem) {
   editing.value = false
   versions.value = await api<VersionItem[]>(`spaces/${spaceId.value}/nodes/${node.id}/versions`)
   await loadChanges(node.id)
+  void loadRecent()
+  following.value = await api<{ following: boolean }>(
+    `spaces/${spaceId.value}/nodes/${node.id}/follow`,
+  )
+    .then((result) => result.following)
+    .catch(() => false)
   if (commentsOpen.value) await loadComments()
 }
 
@@ -698,16 +773,37 @@ async function setVisibility(next: 'space' | 'private') {
   }
 }
 
-/** 新建页面/文件夹。 */
+/** 打开新建弹窗并加载模板。 */
+async function openCreate(parent = '') {
+  createParent.value = parent
+  createTemplateId.value = ''
+  createOpen.value = true
+  if (spaceId.value) {
+    templates.value = await api<TemplateItem[]>(`spaces/${spaceId.value}/templates`).catch(() => [])
+  }
+}
+
+/** 新建页面/文件夹（可选择模板）。 */
 async function createNode() {
   const title = createTitle.value.trim()
   if (!title || !spaceId.value) return
   errorMessage.value = ''
   try {
-    await api(`spaces/${spaceId.value}/nodes`, {
-      method: 'POST',
-      body: { kind: createKind.value, title, parentId: createParent.value || null },
-    })
+    if (createTemplateId.value && createKind.value === 'page') {
+      await api(`spaces/${spaceId.value}/nodes/from-template`, {
+        method: 'POST',
+        body: {
+          templateId: createTemplateId.value,
+          title,
+          parentId: createParent.value || null,
+        },
+      })
+    } else {
+      await api(`spaces/${spaceId.value}/nodes`, {
+        method: 'POST',
+        body: { kind: createKind.value, title, parentId: createParent.value || null },
+      })
+    }
     createOpen.value = false
     createTitle.value = ''
     await loadTree()
@@ -866,6 +962,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 onMounted(() => {
+  void loadRecent()
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('click', closeTreeMenu)
   void loadSpaces()
@@ -910,6 +1007,24 @@ onUnmounted(() => {
             @input="onKeywordInput"
           />
         </div>
+      </div>
+
+      <div
+        v-if="!keyword.trim() && recentViews.length"
+        class="border-b border-[var(--border)] px-2 py-2"
+      >
+        <p class="mb-1 px-1 text-[10px] font-medium tracking-[0.12em] text-neutral-400 uppercase">
+          最近浏览
+        </p>
+        <button
+          v-for="item in recentViews.slice(0, 4)"
+          :key="item.id"
+          class="flex w-full items-center gap-1.5 rounded-[var(--radius-field)] px-1.5 py-1 text-left text-[12px] text-neutral-600 transition-colors hover:bg-[var(--surface-hover)] dark:text-neutral-300"
+          @click="openRecent(item)"
+        >
+          <AppIcon name="clock" class="size-3.5 shrink-0 opacity-60" />
+          <span class="min-w-0 flex-1 truncate">{{ item.title }}</span>
+        </button>
       </div>
 
       <div v-if="keyword.trim()" class="flex-1 overflow-y-auto px-1.5 pb-2">
@@ -961,7 +1076,7 @@ onUnmounted(() => {
             class="hidden rounded p-0.5 text-neutral-400 hover:text-primary-600 group-hover:block"
             role="button"
             aria-label="在此新建"
-            @click.stop="createParent = row.node.id; createOpen = true"
+            @click.stop="openCreate(row.node.id)"
           >
             <AppIcon name="plus" class="size-3" />
           </span>
@@ -970,7 +1085,7 @@ onUnmounted(() => {
       </div>
 
       <div class="border-t border-[var(--border)] p-2">
-        <Button size="sm" variant="secondary" block @click="createParent = ''; createOpen = true">
+        <Button size="sm" variant="secondary" block @click="openCreate('')">
           <AppIcon name="plus" class="size-3.5" /> 新建
         </Button>
       </div>
@@ -1205,6 +1320,15 @@ onUnmounted(() => {
             <span v-if="dirty" class="mr-1 text-[11px] text-warning-700">未保存</span>
             <span v-else-if="savedTip" class="mr-1 text-[11px] text-success-700">{{ savedTip }}</span>
             <button
+              class="rounded-[var(--radius-field)] p-1 transition hover:bg-[var(--surface-hover)]"
+              :class="following ? 'text-warning-700' : 'text-neutral-400'"
+              :title="following ? '已关注，点击取消' : '关注文档更新'"
+              aria-label="关注文档"
+              @click="toggleFollow"
+            >
+              <AppIcon name="star" class="size-4" :class="following ? 'fill-current' : ''" />
+            </button>
+            <button
               class="relative rounded-[var(--radius-field)] p-1 transition hover:bg-[var(--surface-hover)]"
               :class="commentsOpen ? 'text-primary-600' : 'text-neutral-400'"
               aria-label="评论"
@@ -1264,6 +1388,10 @@ onUnmounted(() => {
                     class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
                     @click="pickImport"
                   >导入 Markdown</button>
+                  <button
+                    class="block w-full px-3 py-1.5 text-left hover:bg-[var(--surface-hover)]"
+                    @click="saveAsTemplate"
+                  >存为模板</button>
                 </div>
               </div>
               <input
@@ -1286,7 +1414,9 @@ onUnmounted(() => {
                 {{ current.title }}
               </h1>
               <p class="mt-1.5 mb-6 text-[11px] text-neutral-400">
-                v{{ current.version }} · {{ wordCount }} 字 · Ctrl/Cmd + S 保存
+                v{{ current.version }} · {{ wordCount }} 字
+                <template v-if="current.viewCount"> · {{ current.viewCount }} 人浏览</template>
+                · Ctrl/Cmd + S 保存
                 <span v-if="editing" class="ml-1 text-neutral-300">（停止输入 4 秒自动保存）</span>
               </p>
               <div ref="editorRoot">
@@ -1515,6 +1645,18 @@ onUnmounted(() => {
           </select>
         </label>
       </div>
+      <label v-if="createKind === 'page' && templates.length" class="mt-3 block">
+        <span class="mb-1 block text-[11px] font-medium text-neutral-500">从模板创建（可选）</span>
+        <select
+          v-model="createTemplateId"
+          class="h-8 w-full rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[13px] text-[var(--text-strong)] outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+        >
+          <option value="">空白文档</option>
+          <option v-for="template in templates" :key="template.id" :value="template.id">
+            {{ template.name }}
+          </option>
+        </select>
+      </label>
       <template #footer>
         <Button variant="secondary" @click="createOpen = false">取消</Button>
         <Button :disabled="!createTitle.trim()" @click="createNode">创建</Button>

@@ -69,6 +69,7 @@ pub async fn spawn() -> TestApp {
         db: database,
         config,
         signing_key: RwLock::new(Some(decoding)),
+        bus: None,
     });
     let app = build_router(state.clone());
     TestApp {
