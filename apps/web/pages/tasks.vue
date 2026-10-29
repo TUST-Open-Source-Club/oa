@@ -22,12 +22,16 @@ interface TaskItem {
   completedAt: string | null
   priority: string
   labels?: Array<{ id: string; name: string; color: string }>
+  coverAttachmentId?: string | null
+  coverUrl?: string | null
 }
 interface UserItem { id: string; username: string; nickname: string; department: string | null }
 interface AttachmentItem { id: string; name: string; size: number; mime: string; createdAt: string }
 interface ChangeItem { id: string; action: string; actorId: string | null; createdAt: string }
 
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const projects = ref<ProjectItem[]>([])
 const projectId = ref('')
 const boards = ref<Array<{ id: string; name: string; position: number }>>([])
@@ -36,6 +40,9 @@ const draftLabelIds = ref<string[]>([])
 const filters = reactive({ q: '', assigneeId: '', labelId: '', due: '' })
 const archivedOpen = ref(false)
 const archivedTasks = ref<TaskItem[]>([])
+const quickAddTitle = ref('')
+const currentCoverId = ref<string | null>(null)
+const coverDraft = ref('')
 const boardId = ref('')
 const columns = ref<ColumnItem[]>([])
 const tasks = ref<TaskItem[]>([])
@@ -232,6 +239,49 @@ async function restoreTask(task: TaskItem) {
   await loadBoard()
 }
 
+/** 封面地址走同源 BFF（去掉 /file 后缀）。 */
+function coverSrc(url: string) {
+  return url
+    .replace('/api/v1/task/attachments/', '/api/task/attachments/')
+    .replace('/file?', '?')
+}
+
+/** 把附件设为封面。 */
+async function setCover(attachment: AttachmentItem) {
+  if (!editingId.value) return
+  await api(`tasks/${editingId.value}/cover`, {
+    method: 'POST',
+    body: { attachmentId: attachment.id },
+  })
+  currentCoverId.value = attachment.id
+}
+
+/** 取消封面。 */
+async function clearCover() {
+  if (!editingId.value) return
+  await api(`tasks/${editingId.value}/cover`, { method: 'DELETE' })
+  currentCoverId.value = null
+}
+
+/** 列底快捷添加卡片。 */
+async function quickAdd(columnId: string) {
+  const title = quickAddTitle.value.trim()
+  if (!title) return
+  await api(`columns/${columnId}/tasks`, { method: 'POST', body: { title } })
+  quickAddTitle.value = ''
+  await loadBoard()
+}
+
+/** 关闭任务抽屉并清理 URL。 */
+function closeTask() {
+  taskOpen.value = false
+  if (route.query.card) {
+    const query = { ...route.query }
+    delete query.card
+    void router.replace({ query })
+  }
+}
+
 /** 打开新建弹窗。 */
 function openCreate(columnId?: string) {
   editingId.value = ''
@@ -262,7 +312,10 @@ function openEdit(task: TaskItem) {
   })
   attachments.value = []
   draftLabelIds.value = (task.labels ?? []).map((item) => item.id)
+  currentCoverId.value = task.coverAttachmentId ?? null
   taskOpen.value = true
+  void router.replace({ query: { ...route.query, card: task.id } })
+  void loadAttachments(task.id).catch(() => undefined)
 }
 
 /** 保存（新建或编辑）。 */
@@ -478,7 +531,38 @@ async function addMembers() {
   membersOpen.value = false
 }
 
-onMounted(loadProjects)
+/** 键盘：N 新建、/ 搜索、Esc 关闭抽屉。 */
+function onKeydown(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null
+  const typing =
+    target &&
+    ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) ||
+    Boolean(target?.isContentEditable)
+  if (event.key === 'Escape') {
+    if (taskOpen.value) closeTask()
+    return
+  }
+  if (typing) return
+  if (event.key === 'n' || event.key === 'N') {
+    event.preventDefault()
+    openCreate()
+  }
+  if (event.key === '/') {
+    event.preventDefault()
+    document.querySelector<HTMLInputElement>('input[placeholder="搜索标题"]')?.focus()
+  }
+}
+
+onMounted(async () => {
+  await loadProjects()
+  window.addEventListener('keydown', onKeydown)
+  const cardId = String(route.query.card ?? '')
+  if (cardId) {
+    const task = tasks.value.find((item) => item.id === cardId)
+    if (task) openEdit(task)
+  }
+})
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
@@ -611,6 +695,13 @@ onMounted(loadProjects)
             @dragstart="draggingId = task.id"
             @dragend="draggingId = ''"
           >
+            <img
+              v-if="task.coverUrl"
+              :src="coverSrc(task.coverUrl)"
+              :alt="task.title"
+              class="mb-2 h-24 w-full rounded-[var(--radius-field)] object-cover"
+              loading="lazy"
+            />
             <div v-if="(task.labels ?? []).length" class="mb-1.5 flex flex-wrap gap-1 pl-3">
               <span
                 v-for="label in task.labels"
@@ -712,6 +803,14 @@ onMounted(loadProjects)
             拖拽任务到这里
           </p>
         </div>
+
+        <form class="mt-1.5 px-0.5" @submit.prevent="quickAdd(column.id)">
+          <input
+            v-model="quickAddTitle"
+            placeholder="+ 添加卡片，回车创建"
+            class="h-8 w-full rounded-[var(--radius-field)] border border-transparent bg-transparent px-2 text-[12px] text-[var(--text-strong)] placeholder:text-neutral-400 hover:border-[var(--border)] hover:bg-[var(--surface)] focus:border-primary-500 focus:bg-[var(--surface)] focus:outline-none"
+          />
+        </form>
       </section>
     </div>
 
@@ -723,9 +822,25 @@ onMounted(loadProjects)
       <p class="mt-1 text-[12px] text-neutral-400">项目内按列组织任务，拖拽卡片即可流转状态</p>
     </div>
 
-    <!-- 新建 / 编辑任务 -->
-    <AppModal :open="taskOpen" :title="editingId ? '编辑任务' : '新建任务'" @close="taskOpen = false">
-      <div class="space-y-3">
+    <!-- 新建 / 编辑任务（右侧抽屉） -->
+    <template v-if="taskOpen">
+      <div class="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px]" @click="closeTask" />
+      <aside
+        class="fixed top-0 right-0 z-50 flex h-full w-[460px] max-w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)]"
+      >
+        <header class="flex h-11 shrink-0 items-center justify-between border-b border-[var(--border)] px-4">
+          <h2 class="text-[13px] font-medium text-[var(--text-strong)]">
+            {{ editingId ? '编辑任务' : '新建任务' }}
+          </h2>
+          <button
+            class="rounded-[var(--radius-field)] p-1 text-neutral-400 hover:bg-[var(--surface-hover)] hover:text-neutral-600"
+            aria-label="关闭"
+            @click="closeTask"
+          >
+            <AppIcon name="close" class="size-4" />
+          </button>
+        </header>
+        <div class="flex-1 space-y-3 overflow-y-auto p-4">
         <label class="block">
           <span class="mb-1 block text-[11px] font-medium text-neutral-500">标题</span>
           <Input v-model="draft.title" placeholder="要做什么？" />
@@ -804,6 +919,16 @@ onMounted(loadProjects)
               <span class="min-w-0 flex-1 truncate">{{ attachment.name }}</span>
               <span class="shrink-0 text-[11px] text-neutral-400">{{ formatSize(attachment.size) }}</span>
               <button class="shrink-0 text-[11px] text-primary-600 hover:underline" @click="downloadAttachment(attachment)">下载</button>
+              <button
+                v-if="currentCoverId !== attachment.id"
+                class="shrink-0 text-[11px] text-neutral-500 hover:text-primary-600"
+                @click="setCover(attachment)"
+              >设为封面</button>
+              <button
+                v-else
+                class="shrink-0 text-[11px] text-primary-600 hover:underline"
+                @click="clearCover"
+              >取消封面</button>
               <button class="shrink-0 text-[11px] text-danger-500 hover:underline" @click="removeAttachment(attachment)">删除</button>
             </li>
           </ul>
@@ -845,18 +970,17 @@ onMounted(loadProjects)
             />
           </label>
         </div>
-      </div>
-      <template #footer>
-        <div class="flex w-full items-center justify-between">
+        </div>
+        <footer class="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] p-3">
           <Button v-if="editingId" variant="danger" size="sm" @click="archiveTask">归档</Button>
           <span v-else />
           <div class="flex items-center gap-2">
-            <Button variant="secondary" @click="taskOpen = false">取消</Button>
+            <Button variant="secondary" @click="closeTask">取消</Button>
             <Button :loading="saving" @click="saveTask">保存</Button>
           </div>
-        </div>
-      </template>
-    </AppModal>
+        </footer>
+      </aside>
+    </template>
 
     <!-- 归档 -->
     <AppModal :open="archivedOpen" title="已归档卡片" @close="archivedOpen = false">

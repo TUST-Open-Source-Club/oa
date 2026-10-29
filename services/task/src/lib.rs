@@ -24,6 +24,8 @@ pub mod config {
         pub redis_url: Option<String>,
         /// 附件存储目录。
         pub storage_path: String,
+        /// 内部服务密钥（附件签名等）。
+        pub internal_secret: String,
     }
 
     impl Config {
@@ -54,6 +56,10 @@ pub mod config {
                     .get("TASK_STORAGE_PATH")
                     .cloned()
                     .unwrap_or_else(|| "/data/storage".to_string()),
+                internal_secret: map
+                    .get("INTERNAL_SERVICE_SECRET")
+                    .cloned()
+                    .unwrap_or_else(|| "dev-internal-secret".to_string()),
             })
         }
     }
@@ -180,6 +186,7 @@ pub mod migration4;
 pub mod migration5;
 pub mod migration6;
 pub mod migration7;
+pub mod migration8;
 pub mod repo;
 /// HTTP 路由。
 pub mod routes;

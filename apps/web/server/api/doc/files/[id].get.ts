@@ -6,23 +6,20 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'DOC_FILE_BAD_REQUEST' })
   }
   const base = useRuntimeConfig(event).docServiceUrl
-  try {
-    const upstream = await $fetch.raw(
-      `${base}/api/v1/doc/files/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`,
-      { responseType: 'arrayBuffer' },
-    )
-    setResponseHeader(
-      event,
-      'content-type',
-      upstream.headers.get('content-type') ?? 'application/octet-stream',
-    )
-    setResponseHeader(event, 'cache-control', 'private, max-age=86400')
-    return new Uint8Array(upstream._data as ArrayBuffer)
-  } catch (error: unknown) {
-    const status = (error as { response?: { status?: number } }).response?.status ?? 502
+  const upstream = await fetch(
+    `${base}/api/v1/doc/files/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`,
+  )
+  if (!upstream.ok) {
     throw createError({
-      statusCode: status,
-      statusMessage: status === 401 ? 'DOC_FILE_TOKEN_INVALID' : 'DOC_FILE_ERROR',
+      statusCode: upstream.status,
+      statusMessage: upstream.status === 401 ? 'DOC_FILE_TOKEN_INVALID' : 'DOC_FILE_ERROR',
     })
   }
+  setResponseHeader(
+    event,
+    'content-type',
+    upstream.headers.get('content-type') ?? 'application/octet-stream',
+  )
+  setResponseHeader(event, 'cache-control', 'private, max-age=86400')
+  return Buffer.from(await upstream.arrayBuffer())
 })

@@ -68,6 +68,13 @@ pub async fn spawn_with_env(extra_env: HashMap<String, String>) -> TestApp {
     let mut env: HashMap<String, String> = HashMap::new();
     env.insert("DATABASE_URL".to_string(), url);
     env.insert("AUTH_ISSUER".to_string(), "https://oa.test".to_string());
+    // 附件测试需要可写目录
+    let storage = std::env::temp_dir().join(format!("task-test-{schema}"));
+    let _ = std::fs::create_dir_all(&storage);
+    env.insert(
+        "TASK_STORAGE_PATH".to_string(),
+        storage.to_string_lossy().to_string(),
+    );
     env.extend(extra_env);
     let config = Config::from_map(env).expect("config");
 

@@ -258,6 +258,7 @@ pub async fn create_task(
         created_by: Set(user_id),
         status: Set("active".to_string()),
         completed_at: Set(None),
+        cover_attachment_id: Set(None),
         archived_at: Set(None),
         created_at: Set(now.fixed_offset()),
         updated_at: Set(now.fixed_offset()),
@@ -693,6 +694,7 @@ pub async fn restore_task(
             .unwrap_or(0)),
         created_by: Set(fallback_created_by),
         archived_at: Set(None),
+        cover_attachment_id: Set(None),
         status: Set(snapshot
             .get("status")
             .and_then(serde_json::Value::as_str)

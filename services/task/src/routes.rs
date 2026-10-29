@@ -133,6 +133,10 @@ pub struct TaskDto {
     pub updated_at: DateTime<FixedOffset>,
     /// 标签。
     pub labels: Vec<LabelDto>,
+    /// 封面附件。
+    pub cover_attachment_id: Option<String>,
+    /// 封面签名地址。
+    pub cover_url: Option<String>,
 }
 
 /// 标签 DTO。
@@ -179,6 +183,8 @@ impl From<&task::Model> for TaskDto {
             completed_at: model.completed_at,
             updated_at: model.updated_at,
             labels: Vec::new(),
+            cover_attachment_id: model.cover_attachment_id.map(|id| id.to_string()),
+            cover_url: None,
         }
     }
 }
@@ -286,21 +292,6 @@ pub async fn delete_column(
     }
     repo::delete_column(&state.db, column_id).await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// 给任务 DTO 批量填充标签。
-async fn fill_labels(state: &SharedState, models: &[task::Model], dtos: &mut [TaskDto]) {
-    let ids: Vec<Uuid> = models.iter().map(|model| model.id).collect();
-    let map = repo::labels_for_tasks(&state.db, &ids)
-        .await
-        .unwrap_or_default();
-    for dto in dtos.iter_mut() {
-        if let Ok(id) = Uuid::parse_str(&dto.id) {
-            if let Some(labels) = map.get(&id) {
-                dto.labels = labels.iter().map(LabelDto::from).collect();
-            }
-        }
-    }
 }
 
 /// 校验颜色格式（#rrggbb）。
@@ -612,8 +603,10 @@ pub async fn list_board_tasks(
         due: query.due,
     };
     let tasks = repo::list_tasks_by_board(&state.db, board_id, &filter, state.now()).await?;
-    let mut dtos = tasks.iter().map(TaskDto::from).collect::<Vec<_>>();
-    fill_labels(&state, &tasks, &mut dtos).await;
+    let mut dtos = Vec::with_capacity(tasks.len());
+    for model in &tasks {
+        dtos.push(task_dto(&state, model).await?);
+    }
     Ok(Json(json!(dtos)))
 }
 
@@ -627,8 +620,10 @@ pub async fn list_archived_tasks(
     let board = load_board(&state, board_id).await?;
     repo::ensure_member(&state.db, board.project_id, user_id).await?;
     let tasks = repo::list_archived_tasks(&state.db, board_id).await?;
-    let mut dtos = tasks.iter().map(TaskDto::from).collect::<Vec<_>>();
-    fill_labels(&state, &tasks, &mut dtos).await;
+    let mut dtos = Vec::with_capacity(tasks.len());
+    for model in &tasks {
+        dtos.push(task_dto(&state, model).await?);
+    }
     Ok(Json(json!(dtos)))
 }
 
@@ -737,6 +732,13 @@ async fn task_dto(state: &SharedState, model: &task::Model) -> Result<TaskDto, A
     let mut labels = repo::labels_for_tasks(&state.db, &[model.id]).await?;
     if let Some(rows) = labels.remove(&model.id) {
         dto.labels = rows.iter().map(LabelDto::from).collect();
+    }
+    if let Some(attachment_id) = model.cover_attachment_id {
+        if let Ok(token) = sign_attachment_token(&state.config.internal_secret, attachment_id) {
+            dto.cover_url = Some(format!(
+                "/api/v1/task/attachments/{attachment_id}/file?token={token}"
+            ));
+        }
     }
     Ok(dto)
 }
@@ -1168,6 +1170,131 @@ impl From<&task_attachment::Model> for AttachmentDto {
             created_at: model.created_at,
         }
     }
+}
+
+/// 附件签名有效期：365 天（URL 会写进卡片封面）。
+const ATTACHMENT_TOKEN_TTL_SECONDS: i64 = 365 * 24 * 3600;
+
+/// 附件签名载荷。
+#[derive(Debug, Serialize, Deserialize)]
+struct AttachmentTokenClaims {
+    /// 附件 ID。
+    sub: String,
+    /// 过期时间戳。
+    exp: i64,
+}
+
+/// 生成附件下载签名（HS256）。
+fn sign_attachment_token(secret: &str, attachment_id: Uuid) -> Result<String, AppError> {
+    let claims = AttachmentTokenClaims {
+        sub: attachment_id.to_string(),
+        exp: chrono::Utc::now().timestamp() + ATTACHMENT_TOKEN_TTL_SECONDS,
+    };
+    jsonwebtoken::encode(
+        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(AppError::internal)
+}
+
+/// 附件签名查询参数。
+#[derive(Debug, Deserialize)]
+pub struct AttachmentTokenQuery {
+    /// 签名。
+    pub token: String,
+}
+
+/// `GET /attachments/{id}/file?token=`：签名下载（`<img>` 可用）。
+pub async fn public_attachment(
+    State(state): State<SharedState>,
+    Path(attachment_id): Path<Uuid>,
+    Query(query): Query<AttachmentTokenQuery>,
+) -> Result<axum::response::Response, AppError> {
+    use axum::response::IntoResponse;
+    let validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+    let decoded = jsonwebtoken::decode::<AttachmentTokenClaims>(
+        &query.token,
+        &jsonwebtoken::DecodingKey::from_secret(state.config.internal_secret.as_bytes()),
+        &validation,
+    )
+    .map_err(|_| AppError::unauthorized("AUTH_INVALID_TOKEN", "下载链接无效或已过期"))?;
+    if decoded.claims.sub != attachment_id.to_string() {
+        return Err(AppError::unauthorized(
+            "AUTH_INVALID_TOKEN",
+            "下载链接与附件不匹配",
+        ));
+    }
+    let model = task_attachment::Entity::find_by_id(attachment_id)
+        .one(&state.db)
+        .await
+        .map_err(repo::map_db_err)?
+        .ok_or_else(|| AppError::not_found("TASK_ATTACHMENT_NOT_FOUND", "附件不存在"))?;
+    let path = std::path::Path::new(&state.config.storage_path).join(&model.storage_key);
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|_| AppError::not_found("TASK_ATTACHMENT_NOT_FOUND", "附件文件缺失"))?;
+    Ok((
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, model.mime.clone()),
+            (
+                axum::http::header::CACHE_CONTROL,
+                "private, max-age=86400".to_string(),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+/// 设置封面请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverRequest {
+    /// 附件 ID。
+    pub attachment_id: Uuid,
+}
+
+/// `POST /tasks/{id}/cover`：设置卡片封面。
+pub async fn set_cover(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(task_id): Path<Uuid>,
+    Json(input): Json<CoverRequest>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let model = load_task_for_member(&state, user_id, task_id).await?;
+    let attachment = task_attachment::Entity::find_by_id(input.attachment_id)
+        .filter(task_attachment::Column::TaskId.eq(task_id))
+        .one(&state.db)
+        .await
+        .map_err(repo::map_db_err)?
+        .ok_or_else(|| {
+            AppError::unprocessable(
+                "TASK_VALIDATION",
+                "附件不属于该任务",
+                vec![FieldError::new("attachmentId", "附件不属于该任务")],
+            )
+        })?;
+    let mut active: task::ActiveModel = model.into();
+    active.cover_attachment_id = Set(Some(attachment.id));
+    active.update(&state.db).await.map_err(repo::map_db_err)?;
+    Ok(Json(json!({ "coverAttachmentId": attachment.id })))
+}
+
+/// `DELETE /tasks/{id}/cover`：取消封面。
+pub async fn clear_cover(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(task_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let model = load_task_for_member(&state, user_id, task_id).await?;
+    let mut active: task::ActiveModel = model.into();
+    active.cover_attachment_id = Set(None);
+    active.update(&state.db).await.map_err(repo::map_db_err)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// 附件上传查询参数。
@@ -1810,6 +1937,8 @@ pub fn router() -> Router<SharedState> {
             "/tasks/{id}/attachments/{attachment_id}/download",
             get(download_attachment),
         )
+        .route("/tasks/{id}/cover", post(set_cover).delete(clear_cover))
+        .route("/attachments/{id}/file", get(public_attachment))
         .route(
             "/tasks/{id}/attachments/{attachment_id}",
             axum::routing::delete(delete_attachment),

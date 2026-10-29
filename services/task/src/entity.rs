@@ -167,6 +167,9 @@ pub mod task {
         /// 完成时间。
         #[sea_orm(nullable)]
         pub completed_at: Option<DateTimeWithTimeZone>,
+        /// 封面附件。
+        #[sea_orm(nullable)]
+        pub cover_attachment_id: Option<Uuid>,
         /// 归档时间。
         #[sea_orm(nullable)]
         pub archived_at: Option<DateTimeWithTimeZone>,
