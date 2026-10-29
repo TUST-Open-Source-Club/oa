@@ -13,7 +13,7 @@
 ## P1 · 协作
 
 - [x] 评论：块级锚点（按标题）、回复、解决/未解决；`@` 接 notify 待补
-- [ ] 版本 diff（任选两版）+ 恢复
+- [x] 版本 diff（历史版本 ↔ 当前正文）+ 恢复
 - [ ] 关注文档 → 正文变更通知（走 notify 偏好）
 - [ ] 权限细化：空间角色 owner/admin/editor/reader + 文档级覆盖
 
@@ -154,3 +154,14 @@ viewer 自动排除 `private`，已删除不出现，按更新时间倒序，返
 截图：`docs/ui-preview/docs-comments.png`。
 
 **待补**：评论 `@` 提及接 notify（需要用户目录或 `@username` 解析）——放到「关注通知」一起做。
+
+## 已完成（P1 第 2 项 · 版本 diff）
+
+- 后端：`GET /spaces/{id}/nodes/{nodeId}/versions/{version}` 返回该版本正文与作者
+  （版本不存在 404，非成员 403）；
+- 前端：新增 `utils/text-diff.ts`（LCS 逐行 diff，6 条单测），历史版本面板点任意版本
+  即与当前正文对比，带 `+n/-n` 统计与增删底色；保留原有「回滚」；
+- 顺手修掉操作记录「Invalid Date」（审计接口返回 snake_case，前端统一成驼峰）。
+
+测试：`services/doc/tests/versions_flow.rs` 2 条 + `utils/text-diff.spec.ts` 6 条。
+截图：`docs/ui-preview/docs-version-diff.png`。

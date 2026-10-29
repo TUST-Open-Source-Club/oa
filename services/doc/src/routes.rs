@@ -1278,6 +1278,26 @@ pub async fn list_versions(
         .collect::<Vec<_>>())))
 }
 
+/// `GET /spaces/{id}/nodes/{node_id}/versions/{version}`：读取某个历史版本正文。
+pub async fn get_version(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((space_id, node_id, version_number)): Path<(Uuid, Uuid, i64)>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    repo::ensure_member(&state.db, space_id, user_id).await?;
+    load_node(&state, space_id, node_id).await?;
+    let version = repo::find_version(&state.db, node_id, version_number)
+        .await?
+        .ok_or_else(|| AppError::not_found("DOC_VERSION_NOT_FOUND", "版本不存在"))?;
+    Ok(Json(json!({
+        "version": version.version,
+        "contentMd": version.content_md,
+        "authorId": version.author_id,
+        "createdAt": version.created_at,
+    })))
+}
+
 /// `POST /spaces/{id}/nodes/{node_id}/versions/{version}/restore`：回滚到历史版本。
 pub async fn restore_version(
     State(state): State<SharedState>,
@@ -1324,6 +1344,10 @@ pub fn router() -> Router<SharedState> {
         )
         .route("/changes/{id}/undo", post(undo_change))
         .route("/spaces/{id}/nodes/{node_id}/versions", get(list_versions))
+        .route(
+            "/spaces/{id}/nodes/{node_id}/versions/{version}",
+            get(get_version),
+        )
         .route(
             "/spaces/{id}/nodes/{node_id}/versions/{version}/restore",
             post(restore_version),

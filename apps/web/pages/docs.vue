@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** 文档：仿语雀三栏（空间/文档树 | 正文编辑 | 大纲与历史），乐观锁保存。 */
 import { Button } from '@club-oa/ui'
+import { diffLines } from '~/utils/text-diff'
 
 interface SpaceItem {
   id: string
@@ -83,6 +84,10 @@ const renameTarget = ref<NodeItem | null>(null)
 const moveOpen = ref(false)
 const moveTarget = ref<NodeItem | null>(null)
 const moveParent = ref('')
+
+const selectedVersion = ref<number | null>(null)
+const versionContent = ref('')
+const versionLoading = ref(false)
 
 const commentsOpen = ref(false)
 const comments = ref<CommentItem[]>([])
@@ -381,6 +386,34 @@ async function onImportPicked(event: Event) {
   }
 }
 
+/** 打开某个历史版本并与当前正文对比。 */
+async function openVersion(item: VersionItem) {
+  if (!current.value) return
+  selectedVersion.value = item.version
+  versionLoading.value = true
+  errorMessage.value = ''
+  try {
+    const data = await api<{ version: number; contentMd: string }>(
+      `spaces/${spaceId.value}/nodes/${current.value.id}/versions/${item.version}`,
+    )
+    versionContent.value = data.contentMd
+  } catch (error) {
+    errorMessage.value = apiErrorMessage(error)
+  } finally {
+    versionLoading.value = false
+  }
+}
+
+/** 版本差异（历史版本 → 当前草稿）。 */
+const versionDiff = computed(() => diffLines(versionContent.value, draft.value))
+
+/** 差异统计。 */
+const versionDiffStat = computed(() => {
+  const adds = versionDiff.value.filter((line) => line.kind === 'add').length
+  const removes = versionDiff.value.filter((line) => line.kind === 'remove').length
+  return { adds, removes }
+})
+
 /** 拉取当前文档评论。 */
 async function loadComments() {
   if (!current.value) return
@@ -601,10 +634,17 @@ async function save() {
   }
 }
 
-/** 加载操作记录。 */
+/** 加载操作记录（审计接口返回 snake_case，这里统一成驼峰）。 */
 async function loadChanges(nodeId: string) {
   try {
-    changes.value = await api(`spaces/${spaceId.value}/nodes/${nodeId}/changes`)
+    const rows = await api<
+      Array<{ id: string; action: string; createdAt?: string; created_at?: string }>
+    >(`spaces/${spaceId.value}/nodes/${nodeId}/changes`)
+    changes.value = rows.map((row) => ({
+      id: row.id,
+      action: row.action,
+      createdAt: row.createdAt ?? row.created_at ?? '',
+    }))
   } catch {
     changes.value = []
   }
@@ -1211,12 +1251,31 @@ onUnmounted(() => {
               <div
                 v-for="item in versions"
                 :key="item.version"
-                class="flex items-center justify-between gap-2 py-1 text-[11px]"
+                class="flex items-center justify-between gap-2 rounded-[var(--radius-field)] px-1 py-1 text-[11px]"
+                :class="selectedVersion === item.version ? 'bg-[var(--surface-hover)]' : ''"
               >
-                <span class="text-neutral-500">
+                <button class="min-w-0 flex-1 truncate text-left text-neutral-500 hover:text-[var(--text-strong)]" @click="openVersion(item)">
                   v{{ item.version }} · {{ new Date(item.createdAt).toLocaleDateString('zh-CN') }}
-                </span>
+                </button>
                 <button class="shrink-0 text-primary-600 hover:underline" @click="restore(item.version)">回滚</button>
+              </div>
+
+              <div v-if="selectedVersion !== null" class="mt-3">
+                <p class="mb-1 flex items-center justify-between text-[10px] text-neutral-400">
+                  <span>v{{ selectedVersion }} → 当前</span>
+                  <span>
+                    <span class="text-success-700">+{{ versionDiffStat.adds }}</span>
+                    <span class="ml-1 text-danger-500">-{{ versionDiffStat.removes }}</span>
+                  </span>
+                </p>
+                <p v-if="versionLoading" class="py-2 text-center text-[11px] text-neutral-400">加载中…</p>
+                <pre
+                  v-else
+                  class="max-h-72 overflow-auto rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface-muted)] p-2 font-mono text-[11px] leading-5"
+                ><template v-for="(line, index) in versionDiff" :key="index"><span
+                    class="block break-all whitespace-pre-wrap"
+                    :class="line.kind === 'add' ? 'text-success-700 bg-success-50 dark:bg-success-500/10' : line.kind === 'remove' ? 'text-danger-500 bg-danger-50 dark:bg-danger-500/10' : 'text-neutral-500'"
+                  >{{ line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' ' }} {{ line.text }}</span></template></pre>
               </div>
             </template>
           </aside>
