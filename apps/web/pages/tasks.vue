@@ -44,6 +44,9 @@ const quickAddTitle = ref('')
 const currentCoverId = ref<string | null>(null)
 const syncCursor = ref('')
 let syncTimer: ReturnType<typeof setInterval> | undefined
+const templates = ref<Array<{ id: string; name: string; title: string; descriptionMd: string }>>([])
+const myTasksOpen = ref(false)
+const myTasks = ref<TaskItem[]>([])
 const comments = ref<Array<{ id: string; authorId: string; contentMd: string; createdAt: string }>>([])
 const commentText = ref('')
 const commentMentions = ref<Record<string, string>>({})
@@ -180,6 +183,9 @@ async function loadBoard() {
   await refreshCursor()
   startSyncTimer()
   labels.value = await api<LabelItem[]>(`boards/${boardId.value}/labels`).catch(() => [])
+  templates.value = await api<Array<{ id: string; name: string; title: string; descriptionMd: string }>>(
+    `boards/${boardId.value}/templates`,
+  ).catch(() => [])
   await resolveUsers(list.flatMap((task) => task.assigneeIds ?? []))
 }
 
@@ -299,6 +305,43 @@ async function resetBoardRole(userId: string) {
   await api(`boards/${boardId.value}/members/${userId}`, { method: 'DELETE' })
   await openBoardMembers()
 }
+
+/** 用模板在列里建卡。 */
+async function quickAddFromTemplate(columnId: string, templateId: string) {
+  if (!templateId) return
+  await api(`columns/${columnId}/tasks/from-template`, {
+    method: 'POST',
+    body: { templateId },
+  })
+  await loadBoard()
+}
+
+/** 把当前卡片存为模板。 */
+async function saveAsTemplate() {
+  if (!editingId.value || !boardId.value) return
+  const name = window.prompt('模板名称', draft.title || '新模板')
+  if (!name || !name.trim()) return
+  await api(`boards/${boardId.value}/templates`, {
+    method: 'POST',
+    body: {
+      name: name.trim(),
+      title: draft.title.trim() || '未命名卡片',
+      descriptionMd: draft.descriptionMd ?? '',
+    },
+  })
+  templates.value = await api(`boards/${boardId.value}/templates`)
+  message.value = '已存为模板'
+}
+
+/** 打开我的任务。 */
+async function openMyTasks() {
+  myTasks.value = await api<TaskItem[]>('my/tasks')
+  await resolveUsers(myTasks.value.flatMap((task) => task.assigneeIds ?? []))
+  myTasksOpen.value = true
+}
+
+/** 我的任务分组。 */
+const myTaskGroups = computed(() => groupTasksByDue(myTasks.value))
 
 /** 清空筛选。 */
 function clearFilters() {
@@ -901,6 +944,17 @@ onUnmounted(() => {
           </p>
         </div>
 
+        <select
+          v-if="templates.length"
+          class="mt-1.5 h-7 w-full rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] px-2 text-[11px] text-neutral-500"
+          value=""
+          @change="quickAddFromTemplate(column.id, ($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
+        >
+          <option value="">从模板新建卡片…</option>
+          <option v-for="template in templates" :key="template.id" :value="template.id">
+            {{ template.name }}
+          </option>
+        </select>
         <form class="mt-1.5 px-0.5" @submit.prevent="quickAdd(column.id)">
           <input
             v-model="quickAddTitle"
@@ -1112,8 +1166,10 @@ onUnmounted(() => {
         </div>
         </div>
         <footer class="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--border)] p-3">
-          <Button v-if="editingId" variant="danger" size="sm" @click="archiveTask">归档</Button>
-          <span v-else />
+          <div class="flex items-center gap-2">
+            <Button v-if="editingId" variant="danger" size="sm" @click="archiveTask">归档</Button>
+            <Button v-if="editingId" variant="ghost" size="sm" @click="saveAsTemplate">存为模板</Button>
+          </div>
           <div class="flex items-center gap-2">
             <Button variant="secondary" @click="closeTask">取消</Button>
             <Button :loading="saving" @click="saveTask">保存</Button>
@@ -1139,6 +1195,39 @@ onUnmounted(() => {
       </ul>
       <template #footer>
         <Button variant="secondary" @click="archivedOpen = false">关闭</Button>
+      </template>
+    </AppModal>
+
+    <!-- 我的任务 -->
+    <AppModal :open="myTasksOpen" title="我的任务" @close="myTasksOpen = false">
+      <p v-if="myTasks.length === 0" class="py-6 text-center text-[12px] text-neutral-400">
+        没有指派给你的未完成任务
+      </p>
+      <div v-else class="space-y-4">
+        <section v-for="(rows, bucket) in myTaskGroups" :key="bucket">
+          <template v-if="rows.length">
+            <h3 class="mb-1 text-[11px] font-medium text-neutral-400">
+              {{ bucket === 'overdue' ? '已逾期' : bucket === 'today' ? '今天' : bucket === 'week' ? '本周' : bucket === 'later' ? '以后' : '无截止时间' }}
+              （{{ rows.length }}）
+            </h3>
+            <ul class="space-y-1">
+              <li v-for="task in rows" :key="task.id">
+                <button
+                  class="flex w-full items-center justify-between gap-2 rounded-[var(--radius-field)] px-2 py-1.5 text-left text-[12px] hover:bg-[var(--surface-hover)]"
+                  @click="myTasksOpen = false; openEdit(task)"
+                >
+                  <span class="min-w-0 flex-1 truncate text-[var(--text-strong)]">{{ task.title }}</span>
+                  <span class="shrink-0 text-[10px] text-neutral-400">
+                    {{ task.dueAt ? new Date(task.dueAt).toLocaleDateString('zh-CN') : '' }}
+                  </span>
+                </button>
+              </li>
+            </ul>
+          </template>
+        </section>
+      </div>
+      <template #footer>
+        <Button variant="secondary" @click="myTasksOpen = false">关闭</Button>
       </template>
     </AppModal>
 

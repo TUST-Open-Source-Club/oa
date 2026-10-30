@@ -384,3 +384,34 @@ pub mod board_member {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// 卡片模板。
+pub mod card_template {
+    use sea_orm::entity::prelude::*;
+
+    /// 模板模型。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "card_templates")]
+    pub struct Model {
+        /// ID。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: Uuid,
+        /// 所属看板。
+        pub board_id: Uuid,
+        /// 模板名称。
+        pub name: String,
+        /// 卡片标题。
+        pub title: String,
+        /// 卡片描述。
+        #[sea_orm(column_type = "Text")]
+        pub description_md: String,
+        /// 创建时间。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}

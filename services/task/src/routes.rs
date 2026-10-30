@@ -538,6 +538,170 @@ pub async fn list_board_members(
     Ok(Json(json!(items)))
 }
 
+/// 卡片模板 DTO。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardTemplateDto {
+    /// ID。
+    pub id: String,
+    /// 名称。
+    pub name: String,
+    /// 标题。
+    pub title: String,
+    /// 描述。
+    pub description_md: String,
+    /// 创建时间。
+    pub created_at: DateTime<FixedOffset>,
+}
+
+impl From<&crate::entity::card_template::Model> for CardTemplateDto {
+    fn from(model: &crate::entity::card_template::Model) -> Self {
+        Self {
+            id: model.id.to_string(),
+            name: model.name.clone(),
+            title: model.title.clone(),
+            description_md: model.description_md.clone(),
+            created_at: model.created_at,
+        }
+    }
+}
+
+/// 新建模板请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardTemplateRequest {
+    /// 名称。
+    pub name: String,
+    /// 卡片标题。
+    pub title: String,
+    /// 卡片描述。
+    #[serde(default)]
+    pub description_md: String,
+}
+
+/// `GET /boards/{id}/templates`：卡片模板列表。
+pub async fn list_card_templates(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+) -> Result<Json<Vec<CardTemplateDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_member(&state.db, board.project_id, user_id).await?;
+    let templates = repo::list_card_templates(&state.db, board_id).await?;
+    Ok(Json(templates.iter().map(CardTemplateDto::from).collect()))
+}
+
+/// `POST /boards/{id}/templates`：新建模板（编辑者）。
+pub async fn create_card_template(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+    Json(input): Json<CardTemplateRequest>,
+) -> Result<(StatusCode, Json<CardTemplateDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    ensure_board_editor(&state, &board, user_id).await?;
+    let name = input.name.trim();
+    let title = input.title.trim();
+    if name.is_empty()
+        || name.chars().count() > 64
+        || title.is_empty()
+        || title.chars().count() > 255
+    {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "模板名称/标题不合法",
+            vec![FieldError::new("name/title", "名称 1~64、标题 1~255")],
+        ));
+    }
+    let model = repo::create_card_template(
+        &state.db,
+        board_id,
+        name,
+        title,
+        &input.description_md,
+        state.now(),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(CardTemplateDto::from(&model))))
+}
+
+/// `DELETE /templates/{id}`：删除模板（编辑者）。
+pub async fn delete_card_template(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(template_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let template = repo::find_card_template(&state.db, template_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_TEMPLATE_NOT_FOUND", "模板不存在"))?;
+    let board = load_board(&state, template.board_id).await?;
+    ensure_board_editor(&state, &board, user_id).await?;
+    repo::delete_card_template(&state.db, template_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 从模板建卡请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FromTemplateRequest {
+    /// 模板。
+    pub template_id: Uuid,
+    /// 覆盖标题。
+    pub title: Option<String>,
+}
+
+/// `POST /columns/{id}/tasks/from-template`：用模板建卡。
+pub async fn create_task_from_template(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(column_id): Path<Uuid>,
+    Json(input): Json<FromTemplateRequest>,
+) -> Result<(StatusCode, Json<TaskDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    let column = repo::find_column(&state.db, column_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_COLUMN_NOT_FOUND", "看板列不存在"))?;
+    let board = repo::find_board(&state.db, column.board_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_BOARD_NOT_FOUND", "看板不存在"))?;
+    ensure_board_editor(&state, &board, user_id).await?;
+    let template = repo::find_card_template(&state.db, input.template_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_TEMPLATE_NOT_FOUND", "模板不存在"))?;
+    if template.board_id != board.id {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "模板不属于该看板",
+            vec![FieldError::new("templateId", "模板不属于该看板")],
+        ));
+    }
+    let title = input
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&template.title)
+        .to_string();
+    let model = repo::create_task(
+        &state.db,
+        board.project_id,
+        column.id,
+        &title,
+        &template.description_md,
+        None,
+        "normal",
+        None,
+        None,
+        user_id,
+        state.now(),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(task_dto(&state, &model).await?)))
+}
+
 /// 看板成员请求。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2079,6 +2243,18 @@ pub fn router() -> Router<SharedState> {
         )
         .route("/boards/{id}/tasks", get(list_board_tasks))
         .route("/boards/{id}/sync", get(board_sync))
+        .route(
+            "/boards/{id}/templates",
+            get(list_card_templates).post(create_card_template),
+        )
+        .route(
+            "/templates/{id}",
+            axum::routing::delete(delete_card_template),
+        )
+        .route(
+            "/columns/{id}/tasks/from-template",
+            post(create_task_from_template),
+        )
         .route("/boards/{id}/archived-tasks", get(list_archived_tasks))
         .route("/tasks/{id}/archive", post(archive_task))
         .route("/tasks/{id}/restore", post(restore_task))

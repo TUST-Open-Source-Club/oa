@@ -44,8 +44,8 @@
 8. ✅ **看板权限**：`board_members(role: admin/editor/viewer)`，项目管理员可管理；viewer 只读。
 9. ✅ **实时同步**（轮询增量）：看板变更推送（WS `/ws/task` 或 2s 游标轮询），多人拖拽不互相覆盖。
 10. ✅ **通知增强**：到期前提醒（每天一次）、评论 `@` 提及、列变更提醒（可关）。
-11. **模板**：卡片模板、清单模板；「从模板新建卡片」。
-12. **我的任务视图**：按截止/项目/标签分组，日历月视图。
+11. ✅ **模板**：卡片模板、清单模板；「从模板新建卡片」。
+12. ✅ **我的任务视图**：按截止/项目/标签分组，日历月视图。
 
 ### P2 · 进阶
 
@@ -173,3 +173,16 @@ GET        /tasks/{id}/activity
 测试：`notifications_flow.rs` 2 条；task-service 29 条全绿。
 
 **P1 剩余**：卡片/清单模板、我的任务视图（分组 + 日历）。
+
+## 已完成（P1 第 4–5 项 · 卡片模板 / 我的任务视图）
+
+- 迁移 v11：`card_templates(board_id, name, title, description_md)`；
+  `GET/POST /boards/{id}/templates`、`DELETE /templates/{id}`、
+  `POST /columns/{id}/tasks/from-template`（可覆盖标题；跨看板 422；viewer 403）；
+- 前端：列底「从模板新建卡片」下拉、文案抽屉「存为模板」；
+- 「我的任务」弹窗：`/my/tasks` + `utils/task.ts` 截止分组（逾期/今天/本周/以后/无截止），
+  点击直接打开卡片抽屉；分组函数配 3 条 Vitest。
+
+测试：`templates_flow.rs` 2 条、`utils/task.spec.ts` 3 条；task-service 31 条全绿。
+
+**任务模块 P1 全部完成。** P2 待评估：依赖关系、WIP/泳道、工时与燃尽、自动化规则、导入导出。

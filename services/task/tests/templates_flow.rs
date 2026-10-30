@@ -112,10 +112,7 @@ async fn create_use_and_delete_template() {
     .await;
     let created = created.expect(StatusCode::CREATED);
     assert_eq!(created["title"], "排查线上问题");
-    assert!(created["descriptionMd"]
-        .as_str()
-        .unwrap()
-        .contains("复现"));
+    assert!(created["descriptionMd"].as_str().unwrap().contains("复现"));
 
     // 覆盖标题
     let custom = request(
@@ -126,10 +123,7 @@ async fn create_use_and_delete_template() {
         Some(&json!({ "templateId": template_id, "title": "今晚线上故障" })),
     )
     .await;
-    assert_eq!(
-        custom.expect(StatusCode::CREATED)["title"],
-        "今晚线上故障"
-    );
+    assert_eq!(custom.expect(StatusCode::CREATED)["title"], "今晚线上故障");
 
     request(
         &app.app,
@@ -148,11 +142,7 @@ async fn create_use_and_delete_template() {
         None,
     )
     .await;
-    assert!(list
-        .expect(StatusCode::OK)
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(list.expect(StatusCode::OK).as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

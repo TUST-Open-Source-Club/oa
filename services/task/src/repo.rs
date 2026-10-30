@@ -10,8 +10,8 @@ use uuid::Uuid;
 use club_common::{new_id, AppError};
 
 use crate::entity::{
-    board, board_member, column, comment, label, project, project_member, subtask, task,
-    task_assignee, task_label,
+    board, board_member, card_template, column, comment, label, project, project_member, subtask,
+    task, task_assignee, task_label,
 };
 
 /// 数据库错误 → 统一错误。
@@ -1202,4 +1202,62 @@ pub async fn mark_due_reminded(
     let mut active: task::ActiveModel = model.clone().into();
     active.due_reminded_at = Set(Some(now.fixed_offset()));
     active.update(db).await.map(|_| ()).map_err(map_db_err)
+}
+
+/// 看板卡片模板。
+pub async fn list_card_templates(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+) -> Result<Vec<card_template::Model>, AppError> {
+    card_template::Entity::find()
+        .filter(card_template::Column::BoardId.eq(board_id))
+        .order_by_desc(card_template::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 新建卡片模板。
+pub async fn create_card_template(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+    name: &str,
+    title: &str,
+    description_md: &str,
+    now: DateTime<Utc>,
+) -> Result<card_template::Model, AppError> {
+    card_template::ActiveModel {
+        id: Set(new_id()),
+        board_id: Set(board_id),
+        name: Set(name.to_string()),
+        title: Set(title.to_string()),
+        description_md: Set(description_md.to_string()),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}
+
+/// 查模板。
+pub async fn find_card_template(
+    db: &DatabaseConnection,
+    template_id: Uuid,
+) -> Result<Option<card_template::Model>, AppError> {
+    card_template::Entity::find_by_id(template_id)
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 删除模板。
+pub async fn delete_card_template(
+    db: &DatabaseConnection,
+    template_id: Uuid,
+) -> Result<(), AppError> {
+    card_template::Entity::delete_by_id(template_id)
+        .exec(db)
+        .await
+        .map(|_| ())
+        .map_err(map_db_err)
 }
