@@ -137,6 +137,20 @@ pub struct TaskDto {
     pub cover_attachment_id: Option<String>,
     /// 封面签名地址。
     pub cover_url: Option<String>,
+    /// 前置依赖。
+    pub blocked_by: Vec<BlockerDto>,
+}
+
+/// 前置任务摘要。
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockerDto {
+    /// ID。
+    pub id: String,
+    /// 标题。
+    pub title: String,
+    /// 状态。
+    pub status: String,
 }
 
 /// 标签 DTO。
@@ -185,6 +199,7 @@ impl From<&task::Model> for TaskDto {
             labels: Vec::new(),
             cover_attachment_id: model.cover_attachment_id.map(|id| id.to_string()),
             cover_url: None,
+            blocked_by: Vec::new(),
         }
     }
 }
@@ -702,6 +717,69 @@ pub async fn create_task_from_template(
     Ok((StatusCode::CREATED, Json(task_dto(&state, &model).await?)))
 }
 
+/// 任务所属看板。
+async fn board_of_task(state: &SharedState, task: &task::Model) -> Result<board::Model, AppError> {
+    let column = repo::find_column(&state.db, task.column_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_COLUMN_NOT_FOUND", "看板列不存在"))?;
+    repo::find_board(&state.db, column.board_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_BOARD_NOT_FOUND", "看板不存在"))
+}
+
+/// `POST /tasks/{id}/dependencies/{blocked_by_id}`：加依赖。
+pub async fn add_dependency(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((task_id, blocked_by_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let task = load_task_for_member(&state, user_id, task_id).await?;
+    let board = board_of_task(&state, &task).await?;
+    ensure_board_editor(&state, &board, user_id).await?;
+    if task_id == blocked_by_id {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "不能依赖自己",
+            vec![FieldError::new("blockedBy", "不能依赖自己")],
+        ));
+    }
+    let blocker = repo::find_task(&state.db, blocked_by_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_NOT_FOUND", "前置任务不存在"))?;
+    let blocker_board = board_of_task(&state, &blocker).await?;
+    if blocker_board.id != board.id {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "只能依赖同看板的任务",
+            vec![FieldError::new("blockedBy", "跨看板任务")],
+        ));
+    }
+    if repo::depends_on(&state.db, blocked_by_id, task_id).await? {
+        return Err(AppError::unprocessable(
+            "TASK_DEPENDENCY_CYCLE",
+            "依赖关系不能成环",
+            vec![FieldError::new("blockedBy", "形成环")],
+        ));
+    }
+    repo::add_dependency(&state.db, task_id, blocked_by_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /tasks/{id}/dependencies/{blocked_by_id}`：移除依赖。
+pub async fn remove_dependency(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path((task_id, blocked_by_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let task = load_task_for_member(&state, user_id, task_id).await?;
+    let board = board_of_task(&state, &task).await?;
+    ensure_board_editor(&state, &board, user_id).await?;
+    repo::remove_dependency(&state.db, task_id, blocked_by_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// 看板成员请求。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1063,6 +1141,15 @@ async fn task_dto(state: &SharedState, model: &task::Model) -> Result<TaskDto, A
     if let Some(rows) = labels.remove(&model.id) {
         dto.labels = rows.iter().map(LabelDto::from).collect();
     }
+    let blockers = repo::list_blockers(&state.db, model.id).await?;
+    dto.blocked_by = blockers
+        .iter()
+        .map(|row| BlockerDto {
+            id: row.id.to_string(),
+            title: row.title.clone(),
+            status: row.status.clone(),
+        })
+        .collect();
     if let Some(attachment_id) = model.cover_attachment_id {
         if let Ok(token) = sign_attachment_token(&state.config.internal_secret, attachment_id) {
             dto.cover_url = Some(format!(
@@ -2250,6 +2337,10 @@ pub fn router() -> Router<SharedState> {
         .route(
             "/templates/{id}",
             axum::routing::delete(delete_card_template),
+        )
+        .route(
+            "/tasks/{id}/dependencies/{blocked_by_id}",
+            post(add_dependency).delete(remove_dependency),
         )
         .route(
             "/columns/{id}/tasks/from-template",

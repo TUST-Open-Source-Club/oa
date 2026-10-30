@@ -24,6 +24,7 @@ interface TaskItem {
   labels?: Array<{ id: string; name: string; color: string }>
   coverAttachmentId?: string | null
   coverUrl?: string | null
+  blockedBy?: Array<{ id: string; title: string; status: string }>
 }
 interface UserItem { id: string; username: string; nickname: string; department: string | null }
 interface AttachmentItem { id: string; name: string; size: number; mime: string; createdAt: string }
@@ -259,6 +260,30 @@ function startSyncTimer() {
     }
   }, 4000)
 }
+
+/** 给当前卡片加依赖。 */
+async function addDependency(blockerId: string) {
+  if (!editingId.value || !blockerId) return
+  await api(`tasks/${editingId.value}/dependencies/${blockerId}`, { method: 'POST' })
+  const refreshed = await api<TaskItem>(`tasks/${editingId.value}`)
+  const index = tasks.value.findIndex((item) => item.id === editingId.value)
+  if (index >= 0) tasks.value[index] = refreshed
+  message.value = '已添加依赖'
+}
+
+/** 移除依赖。 */
+async function removeDependency(blockerId: string) {
+  if (!editingId.value) return
+  await api(`tasks/${editingId.value}/dependencies/${blockerId}`, { method: 'DELETE' })
+  const refreshed = await api<TaskItem>(`tasks/${editingId.value}`)
+  const index = tasks.value.findIndex((item) => item.id === editingId.value)
+  if (index >= 0) tasks.value[index] = refreshed
+}
+
+/** 依赖候选：同看板其它卡片。 */
+const dependencyCandidates = computed(() =>
+  tasks.value.filter((task) => task.id !== editingId.value),
+)
 
 /** 加载任务评论。 */
 async function loadComments(taskId: string) {
@@ -860,6 +885,13 @@ onUnmounted(() => {
                 {{ task.title }}
               </p>
               <span
+                v-if="(task.blockedBy ?? []).length"
+                class="shrink-0 rounded bg-warning-50 px-1.5 text-[10px] leading-4 text-warning-700 dark:bg-warning-500/15"
+                :title="task.blockedBy!.map((row) => row.title).join('、')"
+              >
+                依赖 {{ task.blockedBy!.length }}
+              </span>
+              <span
                 v-if="statusOf(task)"
                 class="shrink-0 rounded px-1.5 text-[10px] leading-4"
                 :class="statusOf(task)?.class"
@@ -1084,6 +1116,37 @@ onUnmounted(() => {
             </li>
           </ul>
           <p v-else class="text-[11px] text-neutral-400">暂无附件（任意类型，单文件 ≤ 50MB）</p>
+        </div>
+
+        <div v-if="editingId" class="rounded-[var(--radius-field)] border border-[var(--border)] p-3">
+          <p class="mb-1.5 text-[11px] font-medium text-neutral-500">
+            前置依赖（{{ (tasks.find((item) => item.id === editingId)?.blockedBy ?? []).length }}）
+          </p>
+          <ul
+            v-if="(tasks.find((item) => item.id === editingId)?.blockedBy ?? []).length"
+            class="mb-1.5 space-y-1"
+          >
+            <li
+              v-for="blocker in tasks.find((item) => item.id === editingId)!.blockedBy"
+              :key="blocker.id"
+              class="flex items-center justify-between gap-2 text-[12px]"
+            >
+              <span class="min-w-0 flex-1 truncate" :class="blocker.status === 'done' ? 'text-neutral-400 line-through' : 'text-[var(--text-strong)]'">
+                {{ blocker.title }}
+              </span>
+              <button class="text-[11px] text-neutral-400 hover:text-danger-600" @click="removeDependency(blocker.id)">移除</button>
+            </li>
+          </ul>
+          <select
+            class="h-7 w-full rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] px-2 text-[11px] text-neutral-500"
+            value=""
+            @change="addDependency(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
+          >
+            <option value="">添加前置任务…</option>
+            <option v-for="candidate in dependencyCandidates" :key="candidate.id" :value="candidate.id">
+              {{ candidate.title }}
+            </option>
+          </select>
         </div>
 
         <div v-if="editingId" class="rounded-[var(--radius-field)] border border-[var(--border)] p-3">

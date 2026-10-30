@@ -133,7 +133,11 @@ async fn add_and_remove_dependency() {
     )
     .await
     .expect(StatusCode::NO_CONTENT);
-    assert!(blocked_by(&app, &token, &second).await.as_array().unwrap().is_empty());
+    assert!(blocked_by(&app, &token, &second)
+        .await
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]

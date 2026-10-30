@@ -186,3 +186,15 @@ GET        /tasks/{id}/activity
 测试：`templates_flow.rs` 2 条、`utils/task.spec.ts` 3 条；task-service 31 条全绿。
 
 **任务模块 P1 全部完成。** P2 待评估：依赖关系、WIP/泳道、工时与燃尽、自动化规则、导入导出。
+
+## 已完成（P2 第 1 项 · 卡片依赖）
+
+- 迁移 v12：`task_dependencies(task_id, blocked_by_id)`；
+- `POST/DELETE /tasks/{id}/dependencies/{blocked_by_id}`：同看板、不能自依赖、
+  环检测（BFS，422 `TASK_DEPENDENCY_CYCLE`）、viewer 403、重复添加幂等；
+- 任务 DTO 带 `blockedBy: [{ id, title, status }]`；
+- 前端：卡片显示「依赖 N」角标；抽屉「前置依赖」区块（列表 + 添加下拉 + 移除）。
+
+测试：`dependencies_flow.rs` 2 条；task-service 33 条全绿。
+
+**P2 剩余**：WIP 限制/泳道、工时与燃尽、自动化规则、导入导出（Planka 迁移）。

@@ -415,3 +415,26 @@ pub mod card_template {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// 卡片依赖（task 依赖 blocked_by）。
+pub mod task_dependency {
+    use sea_orm::entity::prelude::*;
+
+    /// 依赖模型。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "task_dependencies")]
+    pub struct Model {
+        /// 任务。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub task_id: Uuid,
+        /// 前置任务。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub blocked_by_id: Uuid,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}

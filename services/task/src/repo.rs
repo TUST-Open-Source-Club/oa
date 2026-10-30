@@ -11,7 +11,7 @@ use club_common::{new_id, AppError};
 
 use crate::entity::{
     board, board_member, card_template, column, comment, label, project, project_member, subtask,
-    task, task_assignee, task_label,
+    task, task_assignee, task_dependency, task_label,
 };
 
 /// 数据库错误 → 统一错误。
@@ -1260,4 +1260,88 @@ pub async fn delete_card_template(
         .await
         .map(|_| ())
         .map_err(map_db_err)
+}
+
+/// 卡片的前置任务。
+pub async fn list_blockers(
+    db: &DatabaseConnection,
+    task_id: Uuid,
+) -> Result<Vec<task::Model>, AppError> {
+    let links = task_dependency::Entity::find()
+        .filter(task_dependency::Column::TaskId.eq(task_id))
+        .all(db)
+        .await
+        .map_err(map_db_err)?;
+    if links.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<Uuid> = links.iter().map(|row| row.blocked_by_id).collect();
+    task::Entity::find()
+        .filter(task::Column::Id.is_in(ids))
+        .order_by_asc(task::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 加依赖（幂等）。
+pub async fn add_dependency(
+    db: &DatabaseConnection,
+    task_id: Uuid,
+    blocked_by_id: Uuid,
+) -> Result<(), AppError> {
+    if task_dependency::Entity::find_by_id((task_id, blocked_by_id))
+        .one(db)
+        .await
+        .map_err(map_db_err)?
+        .is_some()
+    {
+        return Ok(());
+    }
+    task_dependency::ActiveModel {
+        task_id: Set(task_id),
+        blocked_by_id: Set(blocked_by_id),
+    }
+    .insert(db)
+    .await
+    .map(|_| ())
+    .map_err(map_db_err)
+}
+
+/// 移除依赖。
+pub async fn remove_dependency(
+    db: &DatabaseConnection,
+    task_id: Uuid,
+    blocked_by_id: Uuid,
+) -> Result<(), AppError> {
+    task_dependency::Entity::delete_by_id((task_id, blocked_by_id))
+        .exec(db)
+        .await
+        .map(|_| ())
+        .map_err(map_db_err)
+}
+
+/// `blocked_by_id` 是否（传递地）依赖 `task_id`，用于环检测。
+pub async fn depends_on(
+    db: &DatabaseConnection,
+    blocked_by_id: Uuid,
+    task_id: Uuid,
+) -> Result<bool, AppError> {
+    let mut frontier = vec![blocked_by_id];
+    let mut seen: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+    while let Some(current) = frontier.pop() {
+        if current == task_id {
+            return Ok(true);
+        }
+        if !seen.insert(current) {
+            continue;
+        }
+        let links = task_dependency::Entity::find()
+            .filter(task_dependency::Column::TaskId.eq(current))
+            .all(db)
+            .await
+            .map_err(map_db_err)?;
+        frontier.extend(links.iter().map(|row| row.blocked_by_id));
+    }
+    Ok(false)
 }
