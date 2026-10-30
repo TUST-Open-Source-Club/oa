@@ -44,6 +44,9 @@ const quickAddTitle = ref('')
 const currentCoverId = ref<string | null>(null)
 const syncCursor = ref('')
 let syncTimer: ReturnType<typeof setInterval> | undefined
+const comments = ref<Array<{ id: string; authorId: string; contentMd: string; createdAt: string }>>([])
+const commentText = ref('')
+const commentMentions = ref<Record<string, string>>({})
 const boardMembersOpen = ref(false)
 const boardMembers = ref<Array<{ userId: string; role: string; inherited: boolean }>>([])
 const coverDraft = ref('')
@@ -251,6 +254,27 @@ function startSyncTimer() {
   }, 4000)
 }
 
+/** 加载任务评论。 */
+async function loadComments(taskId: string) {
+  comments.value = await api<Array<{ id: string; authorId: string; contentMd: string; createdAt: string }>>(
+    `tasks/${taskId}/comments`,
+  )
+  await resolveUsers(comments.value.map((row) => row.authorId))
+}
+
+/** 发表评论（可 @ 成员）。 */
+async function submitComment() {
+  const content = commentText.value.trim()
+  if (!content || !editingId.value) return
+  await api(`tasks/${editingId.value}/comments`, {
+    method: 'POST',
+    body: { contentMd: content, mentions: Object.keys(commentMentions.value) },
+  })
+  commentText.value = ''
+  commentMentions.value = {}
+  await loadComments(editingId.value)
+}
+
 /** 打开看板成员设置。 */
 async function openBoardMembers() {
   if (!boardId.value) return
@@ -384,6 +408,7 @@ function openEdit(task: TaskItem) {
   taskOpen.value = true
   void router.replace({ query: { ...route.query, card: task.id } })
   void loadAttachments(task.id).catch(() => undefined)
+  void loadComments(task.id).catch(() => undefined)
 }
 
 /** 保存（新建或编辑）。 */
@@ -1005,6 +1030,49 @@ onUnmounted(() => {
             </li>
           </ul>
           <p v-else class="text-[11px] text-neutral-400">暂无附件（任意类型，单文件 ≤ 50MB）</p>
+        </div>
+
+        <div v-if="editingId" class="rounded-[var(--radius-field)] border border-[var(--border)] p-3">
+          <p class="mb-1.5 text-[11px] font-medium text-neutral-500">评论（{{ comments.length }}）</p>
+          <ul v-if="comments.length" class="mb-2 space-y-1.5">
+            <li v-for="comment in comments" :key="comment.id" class="text-[12px]">
+              <p class="text-[10px] text-neutral-400">
+                {{ users[comment.authorId]?.nickname ?? '成员' }} · {{ new Date(comment.createdAt).toLocaleString('zh-CN') }}
+              </p>
+              <p class="whitespace-pre-wrap text-[var(--text-strong)]">{{ comment.contentMd }}</p>
+            </li>
+          </ul>
+          <p v-else class="mb-2 text-[11px] text-neutral-400">暂无评论</p>
+          <div v-if="Object.keys(commentMentions).length" class="mb-1 flex flex-wrap gap-1">
+            <span
+              v-for="(name, id) in commentMentions"
+              :key="id"
+              class="rounded bg-primary-50 px-1 text-[10px] text-primary-700 dark:bg-primary-900/40 dark:text-primary-200"
+            >@{{ name }}</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <select
+              class="h-6 rounded-[var(--radius-field)] border border-[var(--border)] bg-[var(--surface)] px-1 text-[10px] text-neutral-500"
+              value=""
+              @change="(commentMentions[($event.target as HTMLSelectElement).value] = users[($event.target as HTMLSelectElement).value]?.nickname ?? '成员'); ($event.target as HTMLSelectElement).value = ''"
+            >
+              <option value="">@ 提醒谁…</option>
+              <option
+                v-for="(user, id) in users"
+                :key="id"
+                :value="id"
+              >{{ user.nickname }}</option>
+            </select>
+            <textarea
+              v-model="commentText"
+              rows="1"
+              placeholder="写评论，Ctrl/Cmd + Enter 发送"
+              class="min-h-7 flex-1 resize-none rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-1 text-[12px] outline-none focus:border-primary-500"
+              @keydown.meta.enter.prevent="submitComment"
+              @keydown.ctrl.enter.prevent="submitComment"
+            />
+            <Button size="sm" :disabled="!commentText.trim()" @click="submitComment">发送</Button>
+          </div>
         </div>
 
         <div v-if="editingId" class="rounded-[var(--radius-field)] border border-[var(--border)] p-3">

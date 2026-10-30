@@ -90,6 +90,22 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move { run_outbox_relay(relay_state, bus).await });
     }
 
+    // 每小时检查一次到期任务（24h 内到期、未提醒过）
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(3600));
+            loop {
+                ticker.tick().await;
+                match task_service::reminders::remind_due_tasks(&state).await {
+                    Ok(0) => {}
+                    Ok(count) => tracing::info!(count, "已发送到期提醒"),
+                    Err(err) => tracing::warn!(error = %err, "到期提醒失败"),
+                }
+            }
+        });
+    }
+
     let listener = TcpListener::bind(&state.config.bind_addr)
         .await
         .with_context(|| format!("监听 {} 失败", state.config.bind_addr))?;

@@ -523,6 +523,7 @@ async fn claim_task_flow() {
         created_by: Set(owner),
         status: Set("active".into()),
         completed_at: Set(None),
+        due_reminded_at: Set(None),
         cover_attachment_id: Set(None),
         archived_at: Set(None),
         created_at: Set(chrono::Utc::now().fixed_offset()),

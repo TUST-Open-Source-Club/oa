@@ -258,6 +258,7 @@ pub async fn create_task(
         created_by: Set(user_id),
         status: Set("active".to_string()),
         completed_at: Set(None),
+        due_reminded_at: Set(None),
         cover_attachment_id: Set(None),
         archived_at: Set(None),
         created_at: Set(now.fixed_offset()),
@@ -694,6 +695,7 @@ pub async fn restore_task(
             .unwrap_or(0)),
         created_by: Set(fallback_created_by),
         archived_at: Set(None),
+        due_reminded_at: Set(None),
         cover_attachment_id: Set(None),
         status: Set(snapshot
             .get("status")
@@ -1172,4 +1174,32 @@ pub async fn list_tasks_updated_since(
         .all(db)
         .await
         .map_err(map_db_err)
+}
+
+/// 24 小时内到期、尚未提醒的任务。
+pub async fn due_soon_tasks(
+    db: &DatabaseConnection,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> Result<Vec<task::Model>, AppError> {
+    task::Entity::find()
+        .filter(task::Column::Status.eq("active"))
+        .filter(task::Column::ArchivedAt.is_null())
+        .filter(task::Column::DueAt.gte(from.fixed_offset()))
+        .filter(task::Column::DueAt.lt(to.fixed_offset()))
+        .filter(task::Column::DueRemindedAt.is_null())
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 记录到期提醒时间。
+pub async fn mark_due_reminded(
+    db: &DatabaseConnection,
+    model: &task::Model,
+    now: DateTime<Utc>,
+) -> Result<(), AppError> {
+    let mut active: task::ActiveModel = model.clone().into();
+    active.due_reminded_at = Set(Some(now.fixed_offset()));
+    active.update(db).await.map(|_| ()).map_err(map_db_err)
 }

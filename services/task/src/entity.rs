@@ -170,6 +170,9 @@ pub mod task {
         /// 封面附件。
         #[sea_orm(nullable)]
         pub cover_attachment_id: Option<Uuid>,
+        /// 到期提醒时间。
+        #[sea_orm(nullable)]
+        pub due_reminded_at: Option<DateTimeWithTimeZone>,
         /// 归档时间。
         #[sea_orm(nullable)]
         pub archived_at: Option<DateTimeWithTimeZone>,

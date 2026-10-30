@@ -43,7 +43,7 @@ fn user_id_of(auth: &AuthUser) -> Result<Uuid, AppError> {
 
 /// 写入 outbox 事件（未配置总线时跳过）。
 #[allow(clippy::too_many_arguments)]
-async fn enqueue_event(
+pub(crate) async fn enqueue_event(
     state: &SharedState,
     event_type: &str,
     actor: Uuid,
@@ -53,7 +53,7 @@ async fn enqueue_event(
     body: &str,
     priority: &str,
 ) {
-    if state.bus.is_none() || targets.is_empty() {
+    if targets.is_empty() {
         return;
     }
     let payload = json!({
@@ -1971,6 +1971,9 @@ impl From<&comment::Model> for CommentDto {
 pub struct CreateCommentRequest {
     /// 内容。
     pub content_md: String,
+    /// `@` 的用户。
+    #[serde(default)]
+    pub mentions: Vec<Uuid>,
 }
 
 /// `GET /tasks/{id}/comments`。
@@ -2003,21 +2006,23 @@ pub async fn create_comment(
         ));
     }
     let comment = repo::create_comment(&state.db, task_id, user_id, content, state.now()).await?;
-    if let Some(assignee) = model.assignee_id {
-        if assignee != user_id {
-            enqueue_event(
-                &state,
-                "task.comment.added",
-                user_id,
-                vec![assignee],
-                task_id,
-                "任务有新评论",
-                &model.title,
-                "normal",
-            )
-            .await;
-        }
-    }
+    let mut targets: Vec<Uuid> = repo::list_task_assignees(&state.db, task_id).await?;
+    targets.extend(model.assignee_id);
+    targets.extend(input.mentions.iter().copied());
+    targets.retain(|id| *id != user_id);
+    targets.sort();
+    targets.dedup();
+    enqueue_event(
+        &state,
+        "task.comment.added",
+        user_id,
+        targets,
+        task_id,
+        "任务有新评论",
+        &model.title,
+        "normal",
+    )
+    .await;
     Ok((StatusCode::CREATED, Json(CommentDto::from(&comment))))
 }
 

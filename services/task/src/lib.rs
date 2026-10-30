@@ -180,6 +180,7 @@ pub mod state {
 
 pub mod entity;
 pub mod migration;
+pub mod migration10;
 pub mod migration2;
 pub mod migration3;
 pub mod migration4;
@@ -188,6 +189,7 @@ pub mod migration6;
 pub mod migration7;
 pub mod migration8;
 pub mod migration9;
+pub mod reminders;
 pub mod repo;
 /// HTTP 路由。
 pub mod routes;
