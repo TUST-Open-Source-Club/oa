@@ -224,16 +224,6 @@ pub mod state {
 pub mod domain;
 pub mod entity;
 pub mod migration;
-pub mod migration10;
-pub mod migration11;
-pub mod migration2;
-pub mod migration3;
-pub mod migration4;
-pub mod migration5;
-pub mod migration6;
-pub mod migration7;
-pub mod migration8;
-pub mod migration9;
 /// WebSocket 实时通道。
 pub mod realtime;
 pub mod repo;

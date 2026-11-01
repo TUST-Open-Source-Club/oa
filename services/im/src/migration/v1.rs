@@ -1,6 +1,6 @@
-//! im schema 迁移（含 outbox 表，事件投递用）。
+//! im schema 初始迁移（v1）。
 
-use sea_orm_migration::prelude::*;
+use super::*;
 
 /// 初始化迁移。
 #[derive(DeriveMigrationName)]
@@ -267,26 +267,4 @@ pub enum Messages {
     RecalledAt,
     /// created_at。
     CreatedAt,
-}
-
-/// 迁移入口。
-pub struct Migrator;
-
-#[async_trait::async_trait]
-impl MigratorTrait for Migrator {
-    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![
-            Box::new(Migration),
-            Box::new(crate::migration2::Migration),
-            Box::new(crate::migration3::Migration),
-            Box::new(crate::migration4::Migration),
-            Box::new(crate::migration5::Migration),
-            Box::new(crate::migration6::Migration),
-            Box::new(crate::migration7::Migration),
-            Box::new(crate::migration8::Migration),
-            Box::new(crate::migration9::Migration),
-            Box::new(crate::migration10::Migration),
-            Box::new(crate::migration11::Migration),
-        ]
-    }
 }
