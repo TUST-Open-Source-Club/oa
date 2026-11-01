@@ -85,6 +85,8 @@ pub struct ColumnDto {
     pub position: i64,
     /// 是否完成列。
     pub is_done: bool,
+    /// WIP 上限。
+    pub wip_limit: Option<i32>,
 }
 
 impl From<&column::Model> for ColumnDto {
@@ -95,6 +97,7 @@ impl From<&column::Model> for ColumnDto {
             name: model.name.clone(),
             position: model.position,
             is_done: model.is_done,
+            wip_limit: model.wip_limit,
         }
     }
 }
@@ -285,6 +288,56 @@ pub async fn add_members(
         added += 1;
     }
     Ok(Json(json!({ "added": added })))
+}
+
+/// 更新列请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateColumnRequest {
+    /// 名称。
+    pub name: Option<String>,
+    /// WIP 上限（null 清除）。
+    #[serde(default, deserialize_with = "double_option")]
+    pub wip_limit: Option<Option<i32>>,
+}
+
+/// `PATCH /columns/{id}`：改名/设置 WIP 上限（编辑者）。
+pub async fn update_column(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(column_id): Path<Uuid>,
+    Json(input): Json<UpdateColumnRequest>,
+) -> Result<Json<ColumnDto>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let mut column = repo::find_column(&state.db, column_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_COLUMN_NOT_FOUND", "看板列不存在"))?;
+    let board = repo::find_board(&state.db, column.board_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_BOARD_NOT_FOUND", "看板不存在"))?;
+    ensure_board_editor(&state, &board, user_id).await?;
+    if let Some(name) = input.name.as_deref() {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 64 {
+            return Err(AppError::unprocessable(
+                "TASK_VALIDATION",
+                "列名称不合法",
+                vec![FieldError::new("name", "1 ~ 64 字符")],
+            ));
+        }
+        column = repo::rename_column(&state.db, &column, name).await?;
+    }
+    if let Some(wip_limit) = input.wip_limit {
+        if wip_limit.is_some_and(|value| !(1..=99).contains(&value)) {
+            return Err(AppError::unprocessable(
+                "TASK_VALIDATION",
+                "WIP 上限需为 1 ~ 99",
+                vec![FieldError::new("wipLimit", "1 ~ 99")],
+            ));
+        }
+        column = repo::set_column_wip(&state.db, &column, wip_limit).await?;
+    }
+    Ok(Json(ColumnDto::from(&column)))
 }
 
 /// `DELETE /columns/{id}`：删除空列（管理员）。
@@ -1231,6 +1284,16 @@ async fn create_task_core(
     column: column::Model,
     input: CreateTaskRequest,
 ) -> Result<(StatusCode, Json<TaskDto>), AppError> {
+    if let Some(limit) = column.wip_limit {
+        let count = repo::column_active_task_count(&state.db, column.id).await?;
+        if count >= limit as u64 {
+            return Err(AppError::unprocessable(
+                "TASK_WIP_LIMIT",
+                format!("「{}」已达 WIP 上限 {limit}", column.name),
+                vec![FieldError::new("columnId", "目标列已满")],
+            ));
+        }
+    }
     let title = input.title.trim();
     if title.is_empty() || title.chars().count() > 255 {
         return Err(AppError::unprocessable(
@@ -2100,8 +2163,20 @@ pub async fn move_task(
         .await?
         .filter(|column| column.project_id == model.project_id)
         .ok_or_else(|| AppError::not_found("TASK_COLUMN_NOT_FOUND", "看板列不存在"))?;
+    if model.column_id != target.id {
+        if let Some(limit) = target.wip_limit {
+            let count = repo::column_active_task_count(&state.db, target.id).await?;
+            if count >= limit as u64 {
+                return Err(AppError::unprocessable(
+                    "TASK_WIP_LIMIT",
+                    format!("「{}」已达 WIP 上限 {limit}", target.name),
+                    vec![FieldError::new("columnId", "目标列已满")],
+                ));
+            }
+        }
+    }
     let moved = repo::move_task(&state.db, &model, &target, state.now()).await?;
-    Ok(Json(TaskDto::from(&moved)))
+    Ok(Json(task_dto(&state, &moved).await?))
 }
 
 /// 子任务 DTO。
@@ -2366,7 +2441,10 @@ pub fn router() -> Router<SharedState> {
             "/tasks/{id}/labels/{label_id}",
             post(attach_label).delete(detach_label),
         )
-        .route("/columns/{id}", axum::routing::delete(delete_column))
+        .route(
+            "/columns/{id}",
+            axum::routing::patch(update_column).delete(delete_column),
+        )
         .route("/projects/{id}/tasks", get(list_tasks).post(create_task))
         .route("/columns/{id}/tasks", post(create_task_in_column))
         .route(

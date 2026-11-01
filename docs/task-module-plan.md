@@ -198,3 +198,14 @@ GET        /tasks/{id}/activity
 测试：`dependencies_flow.rs` 2 条；task-service 33 条全绿。
 
 **P2 剩余**：WIP 限制/泳道、工时与燃尽、自动化规则、导入导出（Planka 迁移）。
+
+## 已完成（P2 第 2 项 · WIP 限制）
+
+- 迁移 v13：`board_columns.wip_limit`（1–99，null 清除）；
+- `PATCH /columns/{id}` 支持改名与 WIP 上限（编辑者）；列 DTO 带 `wipLimit`；
+- 移入或新建到已达上限的列 → 422 `TASK_WIP_LIMIT`（同列移动不拦）；
+- 前端：列头计数显示 `n/limit`，超限标红；点击弹出设置，拖拽被拦时提示。
+
+测试：`wip_flow.rs` 1 条；task-service 34 条全绿。
+
+**P2 剩余**：泳道、工时与燃尽、自动化规则、导入导出（Planka 迁移）。

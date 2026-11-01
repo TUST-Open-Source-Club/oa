@@ -8,7 +8,13 @@ interface LabelItem {
   name: string
   color: string
 }
-interface ColumnItem { id: string; name: string; position: number; isDone: boolean }
+interface ColumnItem {
+  id: string
+  name: string
+  position: number
+  isDone: boolean
+  wipLimit?: number | null
+}
 interface TaskItem {
   id: string
   columnId: string
@@ -368,6 +374,21 @@ async function openMyTasks() {
 /** 我的任务分组。 */
 const myTaskGroups = computed(() => groupTasksByDue(myTasks.value))
 
+/** 编辑列 WIP 上限（空 = 清除）。 */
+async function editWipLimit(column: ColumnItem) {
+  const current = column.wipLimit ?? ''
+  const raw = window.prompt('WIP 上限（1–99，留空清除）', String(current))
+  if (raw === null) return
+  const trimmed = raw.trim()
+  const wipLimit = trimmed === '' ? null : Number(trimmed)
+  if (wipLimit !== null && (!Number.isInteger(wipLimit) || wipLimit < 1 || wipLimit > 99)) {
+    message.value = 'WIP 上限需为 1 ~ 99'
+    return
+  }
+  await api(`columns/${column.id}`, { method: 'PATCH', body: { wipLimit } })
+  await loadBoard()
+}
+
 /** 清空筛选。 */
 function clearFilters() {
   filters.q = ''
@@ -551,8 +572,12 @@ async function onDrop(columnId: string) {
   const task = tasks.value.find((item) => item.id === draggingId.value)
   draggingId.value = ''
   if (!task || task.columnId === columnId) return
-  await api(`tasks/${task.id}/move`, { method: 'POST', body: { columnId } })
-  await loadBoard()
+  try {
+    await api(`tasks/${task.id}/move`, { method: 'POST', body: { columnId } })
+    await loadBoard()
+  } catch (error) {
+    message.value = apiErrorMessage(error, '移动失败')
+  }
 }
 
 /** 加载操作记录。 */
@@ -835,11 +860,16 @@ onUnmounted(() => {
         <div class="mb-1.5 flex items-center justify-between px-1.5 pt-0.5">
           <div class="flex items-center gap-1.5">
             <span class="text-[12px] font-medium text-[var(--text-strong)]">{{ column.name }}</span>
-            <span
-              class="rounded bg-[var(--surface)] px-1.5 text-[10px] leading-4 text-neutral-400 ring-1 ring-[var(--border)]"
+            <button
+              class="rounded bg-[var(--surface)] px-1.5 text-[10px] leading-4 ring-1 ring-[var(--border)]"
+              :class="column.wipLimit && tasksOf(column.id).length > column.wipLimit
+                ? 'text-danger-600 ring-danger-300'
+                : 'text-neutral-400'"
+              :title="column.wipLimit ? 'WIP 上限 ' + column.wipLimit + '，点击修改' : '点击设置 WIP 上限'"
+              @click="editWipLimit(column)"
             >
-              {{ tasksOf(column.id).length }}
-            </span>
+              {{ tasksOf(column.id).length }}<template v-if="column.wipLimit">/{{ column.wipLimit }}</template>
+            </button>
           </div>
           <button
             class="rounded-[var(--radius-field)] p-1 text-neutral-400 transition hover:bg-[var(--surface-hover)] hover:text-neutral-600"

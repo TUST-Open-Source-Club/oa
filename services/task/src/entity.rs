@@ -116,6 +116,9 @@ pub mod column {
         pub position: i64,
         /// 是否为完成列。
         pub is_done: bool,
+        /// WIP 上限。
+        #[sea_orm(nullable)]
+        pub wip_limit: Option<i32>,
         /// 创建时间。
         pub created_at: DateTimeWithTimeZone,
     }

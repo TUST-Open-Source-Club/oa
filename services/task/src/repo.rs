@@ -72,6 +72,7 @@ pub async fn create_project(
             name: Set(name.to_string()),
             position: Set(position),
             is_done: Set(is_done),
+            wip_limit: Set(None),
             created_at: Set(now.fixed_offset()),
         }
         .insert(db)
@@ -178,6 +179,7 @@ pub async fn create_column(
         name: Set(name.to_string()),
         position: Set(max.unwrap_or(0) + 1),
         is_done: Set(false),
+        wip_limit: Set(None),
         created_at: Set(now.fixed_offset()),
     }
     .insert(db)
@@ -1344,4 +1346,40 @@ pub async fn depends_on(
         frontier.extend(links.iter().map(|row| row.blocked_by_id));
     }
     Ok(false)
+}
+
+/// 列内未归档卡片数。
+pub async fn column_active_task_count(
+    db: &DatabaseConnection,
+    column_id: Uuid,
+) -> Result<u64, AppError> {
+    task::Entity::find()
+        .filter(task::Column::ColumnId.eq(column_id))
+        .filter(task::Column::Status.ne("terminated"))
+        .filter(task::Column::ArchivedAt.is_null())
+        .count(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 设置/清除列 WIP 上限。
+pub async fn set_column_wip(
+    db: &DatabaseConnection,
+    column: &column::Model,
+    wip_limit: Option<i32>,
+) -> Result<column::Model, AppError> {
+    let mut active: column::ActiveModel = column.clone().into();
+    active.wip_limit = Set(wip_limit);
+    active.update(db).await.map_err(map_db_err)
+}
+
+/// 列改名。
+pub async fn rename_column(
+    db: &DatabaseConnection,
+    column: &column::Model,
+    name: &str,
+) -> Result<column::Model, AppError> {
+    let mut active: column::ActiveModel = column.clone().into();
+    active.name = Set(name.to_string());
+    active.update(db).await.map_err(map_db_err)
 }
