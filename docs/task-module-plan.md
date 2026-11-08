@@ -222,3 +222,14 @@ GET        /tasks/{id}/activity
 测试：`time_tracking_flow.rs` 2 条；task-service 36 条全绿。
 
 **P2 剩余**：泳道、自动化规则、导入导出（Planka 迁移）。
+
+## 已完成（P2 第 4 项 · 泳道）
+
+- 迁移 v15：`boards.swimlane`（none/assignee/label，默认 none）；
+- `PATCH /boards/{id}` 支持只改泳道或同时改名；BoardDto 带 `swimlane`；非法值 422；
+- 前端：看板头部泳道切换；按负责人/标签把看板拆成横向泳道，
+  列计数与卡片按泳道过滤，未指派/无标签单独成道。
+
+测试：`swimlane_flow.rs` 1 条；task-service 37 条全绿。
+
+**P2 剩余**：自动化规则、导入导出（Planka 迁移）。

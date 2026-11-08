@@ -49,6 +49,8 @@ pub mod board {
         pub name: String,
         /// 排序。
         pub position: i64,
+        /// 泳道：none / assignee / label。
+        pub swimlane: String,
         /// 归档时间。
         #[sea_orm(nullable)]
         pub archived_at: Option<DateTimeWithTimeZone>,

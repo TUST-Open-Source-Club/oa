@@ -43,7 +43,7 @@ const route = useRoute()
 const router = useRouter()
 const projects = ref<ProjectItem[]>([])
 const projectId = ref('')
-const boards = ref<Array<{ id: string; name: string; position: number }>>([])
+const boards = ref<Array<{ id: string; name: string; position: number; swimlane?: string }>>([])
 const labels = ref<LabelItem[]>([])
 const draftLabelIds = ref<string[]>([])
 const filters = reactive({ q: '', assigneeId: '', labelId: '', due: '' })
@@ -112,7 +112,54 @@ function api<T>(path: string, options: Record<string, unknown> = {}) {
   })
 }
 
-const tasksOf = (columnId: string) => tasks.value.filter((task) => task.columnId === columnId)
+/** 泳道模式（来自当前看板设置）。 */
+const swimlaneMode = computed(
+  () => boards.value.find((item) => item.id === boardId.value)?.swimlane ?? 'none',
+)
+
+/** 卡片是否属于某泳道。 */
+function inLane(task: TaskItem, laneKey: string): boolean {
+  if (!laneKey) return true
+  if (swimlaneMode.value === 'assignee') {
+    const ids = task.assigneeIds ?? []
+    return laneKey === 'none' ? ids.length === 0 : ids.includes(laneKey)
+  }
+  if (swimlaneMode.value === 'label') {
+    const ids = (task.labels ?? []).map((label) => label.id)
+    return laneKey === 'none' ? ids.length === 0 : ids.includes(laneKey)
+  }
+  return true
+}
+
+/** 泳道列表。 */
+const lanes = computed(() => {
+  if (swimlaneMode.value === 'none') {
+    return [{ key: '', label: '', count: tasks.value.length }]
+  }
+  if (swimlaneMode.value === 'assignee') {
+    const ids = [...new Set(tasks.value.flatMap((task) => task.assigneeIds ?? []))]
+    const rows = ids.map((id) => ({
+      key: id,
+      label: users.value[id]?.nickname ?? '成员',
+      count: tasks.value.filter((task) => (task.assigneeIds ?? []).includes(id)).length,
+    }))
+    const unassigned = tasks.value.filter((task) => !(task.assigneeIds ?? []).length).length
+    if (unassigned > 0) rows.push({ key: 'none', label: '未指派', count: unassigned })
+    return rows
+  }
+  const rows = labels.value.map((label) => ({
+    key: label.id,
+    label: label.name,
+    count: tasks.value.filter((task) => (task.labels ?? []).some((row) => row.id === label.id))
+      .length,
+  }))
+  const unlabeled = tasks.value.filter((task) => !(task.labels ?? []).length).length
+  if (unlabeled > 0) rows.push({ key: 'none', label: '无标签', count: unlabeled })
+  return rows
+})
+
+const tasksOf = (columnId: string, laneKey = '') =>
+  tasks.value.filter((task) => task.columnId === columnId && inLane(task, laneKey))
 const priorityOf = (value: string) => priorities.find((item) => item.value === value) ?? priorities[1]
 
 /** 状态展示。 */
@@ -469,6 +516,14 @@ async function editWipLimit(column: ColumnItem) {
   }
   await api(`columns/${column.id}`, { method: 'PATCH', body: { wipLimit } })
   await loadBoard()
+}
+
+/** 切换泳道模式。 */
+async function setSwimlane(mode: string) {
+  if (!boardId.value) return
+  await api(`boards/${boardId.value}`, { method: 'PATCH', body: { swimlane: mode } })
+  const local = boards.value.find((item) => item.id === boardId.value)
+  if (local) local.swimlane = mode
 }
 
 /** 清空筛选。 */
@@ -919,6 +974,17 @@ onUnmounted(() => {
       </select>
       <Button variant="ghost" size="sm" @click="clearFilters">清除筛选</Button>
       <Button variant="ghost" size="sm" @click="openArchived">已归档</Button>
+      <select
+        v-if="boardId"
+        :value="swimlaneMode"
+        class="h-8 rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12px] text-neutral-600"
+        title="泳道"
+        @change="setSwimlane(($event.target as HTMLSelectElement).value)"
+      >
+        <option value="none">无泳道</option>
+        <option value="assignee">按负责人</option>
+        <option value="label">按标签</option>
+      </select>
       <Button v-if="boardId" variant="ghost" size="sm" @click="openBoardMembers">看板成员</Button>
     </div>
 
@@ -930,8 +996,17 @@ onUnmounted(() => {
       {{ message }}
     </p>
 
-    <!-- 看板：固定宽度列 + 横向滚动 -->
-    <div v-if="columns.length" class="mt-4 flex items-start gap-3 overflow-x-auto pb-2">
+    <!-- 看板：泳道 + 固定宽度列 + 横向滚动 -->
+    <div v-if="columns.length" class="mt-4 space-y-3">
+      <div v-for="lane in lanes" :key="lane.key" class="space-y-1.5">
+        <div
+          v-if="lanes.length > 1"
+          class="flex items-center gap-2 px-0.5 text-[11px] text-neutral-500"
+        >
+          <span class="font-medium text-[var(--text-strong)]">{{ lane.label }}</span>
+          <span class="text-neutral-400">{{ lane.count }} 张</span>
+        </div>
+        <div class="flex items-start gap-3 overflow-x-auto pb-2">
       <section
         v-for="column in columns"
         :key="column.id"
@@ -946,13 +1021,13 @@ onUnmounted(() => {
             <span class="text-[12px] font-medium text-[var(--text-strong)]">{{ column.name }}</span>
             <button
               class="rounded bg-[var(--surface)] px-1.5 text-[10px] leading-4 ring-1 ring-[var(--border)]"
-              :class="column.wipLimit && tasksOf(column.id).length > column.wipLimit
+              :class="column.wipLimit && tasksOf(column.id, lane.key).length > column.wipLimit
                 ? 'text-danger-600 ring-danger-300'
                 : 'text-neutral-400'"
               :title="column.wipLimit ? 'WIP 上限 ' + column.wipLimit + '，点击修改' : '点击设置 WIP 上限'"
               @click="editWipLimit(column)"
             >
-              {{ tasksOf(column.id).length }}<template v-if="column.wipLimit">/{{ column.wipLimit }}</template>
+              {{ tasksOf(column.id, lane.key).length }}<template v-if="column.wipLimit">/{{ column.wipLimit }}</template>
             </button>
           </div>
           <button
@@ -966,7 +1041,7 @@ onUnmounted(() => {
 
         <div class="space-y-1.5">
           <article
-            v-for="task in tasksOf(column.id)"
+            v-for="task in tasksOf(column.id, lane.key)"
             :key="task.id"
             draggable="true"
             class="group cursor-grab rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] p-2.5 shadow-[var(--shadow-card)] transition hover:border-[var(--border-strong)] active:cursor-grabbing"
@@ -1083,7 +1158,7 @@ onUnmounted(() => {
           </article>
 
           <p
-            v-if="tasksOf(column.id).length === 0"
+            v-if="tasksOf(column.id, lane.key).length === 0"
             class="rounded-[var(--radius-card)] border border-dashed border-[var(--border-strong)] py-5 text-center text-[11px] text-neutral-400"
           >
             拖拽任务到这里
@@ -1109,6 +1184,8 @@ onUnmounted(() => {
           />
         </form>
       </section>
+        </div>
+      </div>
     </div>
 
     <div

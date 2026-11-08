@@ -1043,6 +1043,8 @@ pub struct BoardDto {
     pub name: String,
     /// 排序。
     pub position: i64,
+    /// 泳道：none / assignee / label。
+    pub swimlane: String,
 }
 
 impl From<&board::Model> for BoardDto {
@@ -1051,6 +1053,7 @@ impl From<&board::Model> for BoardDto {
             id: model.id.to_string(),
             name: model.name.clone(),
             position: model.position,
+            swimlane: model.swimlane.clone(),
         }
     }
 }
@@ -1071,8 +1074,15 @@ pub async fn list_boards(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BoardRequest {
-    /// 名称。
-    pub name: String,
+    /// 名称（创建时必填）。
+    pub name: Option<String>,
+    /// 泳道：none / assignee / label。
+    pub swimlane: Option<String>,
+}
+
+/// 校验泳道取值。
+fn valid_swimlane(value: &str) -> bool {
+    ["none", "assignee", "label"].contains(&value)
 }
 
 /// `POST /projects/{id}/boards`：新建看板（管理员）。
@@ -1084,7 +1094,7 @@ pub async fn create_board(
 ) -> Result<(StatusCode, Json<BoardDto>), AppError> {
     let user_id = user_id_of(&auth)?;
     repo::ensure_admin(&state.db, project_id, user_id).await?;
-    let name = input.name.trim();
+    let name = input.name.as_deref().unwrap_or_default().trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(AppError::unprocessable(
             "TASK_VALIDATION",
@@ -1113,15 +1123,28 @@ pub async fn rename_board(
     let user_id = user_id_of(&auth)?;
     let board = load_board(&state, board_id).await?;
     ensure_board_admin(&state, &board, user_id).await?;
-    let name = input.name.trim();
-    if name.is_empty() || name.chars().count() > 64 {
-        return Err(AppError::unprocessable(
-            "TASK_VALIDATION",
-            "看板名称需为 1 ~ 64 字符",
-            vec![FieldError::new("name", "非法")],
-        ));
+    let mut updated = board.clone();
+    if let Some(raw) = input.name.as_deref() {
+        let name = raw.trim();
+        if name.is_empty() || name.chars().count() > 64 {
+            return Err(AppError::unprocessable(
+                "TASK_VALIDATION",
+                "看板名称需为 1 ~ 64 字符",
+                vec![FieldError::new("name", "非法")],
+            ));
+        }
+        updated = repo::rename_board(&state.db, &updated, name).await?;
     }
-    let updated = repo::rename_board(&state.db, &board, name).await?;
+    if let Some(swimlane) = input.swimlane.as_deref() {
+        if !valid_swimlane(swimlane) {
+            return Err(AppError::unprocessable(
+                "TASK_VALIDATION",
+                "泳道取值不合法",
+                vec![FieldError::new("swimlane", "none/assignee/label")],
+            ));
+        }
+        updated = repo::set_board_swimlane(&state.db, &updated, swimlane).await?;
+    }
     Ok(Json(BoardDto::from(&updated)))
 }
 

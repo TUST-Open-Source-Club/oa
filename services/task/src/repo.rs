@@ -53,6 +53,7 @@ pub async fn create_project(
         project_id: Set(model.id),
         name: Set("默认看板".to_string()),
         position: Set(0),
+        swimlane: Set("none".to_string()),
         archived_at: Set(None),
         created_at: Set(now.fixed_offset()),
     }
@@ -760,6 +761,7 @@ pub async fn create_board(
         project_id: Set(project_id),
         name: Set(name.to_string()),
         position: Set(max.unwrap_or(0) + 1),
+        swimlane: Set("none".to_string()),
         archived_at: Set(None),
         created_at: Set(now.fixed_offset()),
     }
@@ -1504,4 +1506,15 @@ pub async fn burndown_points(
         points.push((date, remaining));
     }
     Ok(points)
+}
+
+/// 更新看板泳道。
+pub async fn set_board_swimlane(
+    db: &DatabaseConnection,
+    model: &board::Model,
+    swimlane: &str,
+) -> Result<board::Model, AppError> {
+    let mut active: board::ActiveModel = model.clone().into();
+    active.swimlane = Set(swimlane.to_string());
+    active.update(db).await.map_err(map_db_err)
 }
