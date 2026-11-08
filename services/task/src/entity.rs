@@ -173,6 +173,9 @@ pub mod task {
         /// 封面附件。
         #[sea_orm(nullable)]
         pub cover_attachment_id: Option<Uuid>,
+        /// 预估工时（分钟）。
+        #[sea_orm(nullable)]
+        pub estimated_minutes: Option<i32>,
         /// 到期提醒时间。
         #[sea_orm(nullable)]
         pub due_reminded_at: Option<DateTimeWithTimeZone>,
@@ -433,6 +436,38 @@ pub mod task_dependency {
         /// 前置任务。
         #[sea_orm(primary_key, auto_increment = false)]
         pub blocked_by_id: Uuid,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+/// 工时记录。
+pub mod task_time_entry {
+    use sea_orm::entity::prelude::*;
+
+    /// 工时模型。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "task_time_entries")]
+    pub struct Model {
+        /// ID。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: Uuid,
+        /// 任务。
+        pub task_id: Uuid,
+        /// 记录人。
+        pub user_id: Uuid,
+        /// 分钟数。
+        pub minutes: i32,
+        /// 备注。
+        pub note: String,
+        /// 工作日期。
+        pub spent_on: Date,
+        /// 创建时间。
+        pub created_at: DateTimeWithTimeZone,
     }
 
     /// 关系。

@@ -142,6 +142,10 @@ pub struct TaskDto {
     pub cover_url: Option<String>,
     /// 前置依赖。
     pub blocked_by: Vec<BlockerDto>,
+    /// 预估工时（分钟）。
+    pub estimated_minutes: Option<i32>,
+    /// 已登记工时（分钟）。
+    pub spent_minutes: i64,
 }
 
 /// 前置任务摘要。
@@ -203,6 +207,8 @@ impl From<&task::Model> for TaskDto {
             cover_attachment_id: model.cover_attachment_id.map(|id| id.to_string()),
             cover_url: None,
             blocked_by: Vec::new(),
+            estimated_minutes: model.estimated_minutes,
+            spent_minutes: 0,
         }
     }
 }
@@ -833,6 +839,148 @@ pub async fn remove_dependency(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// 工时记录 DTO。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeEntryDto {
+    /// ID。
+    pub id: String,
+    /// 记录人。
+    pub user_id: String,
+    /// 分钟。
+    pub minutes: i32,
+    /// 备注。
+    pub note: String,
+    /// 工作日期。
+    pub spent_on: chrono::NaiveDate,
+    /// 创建时间。
+    pub created_at: DateTime<FixedOffset>,
+}
+
+impl From<&crate::entity::task_time_entry::Model> for TimeEntryDto {
+    fn from(model: &crate::entity::task_time_entry::Model) -> Self {
+        Self {
+            id: model.id.to_string(),
+            user_id: model.user_id.to_string(),
+            minutes: model.minutes,
+            note: model.note.clone(),
+            spent_on: model.spent_on,
+            created_at: model.created_at,
+        }
+    }
+}
+
+/// 记工时请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeEntryRequest {
+    /// 分钟数。
+    pub minutes: i32,
+    /// 备注。
+    #[serde(default)]
+    pub note: String,
+    /// 工作日期（默认今天）。
+    pub spent_on: Option<chrono::NaiveDate>,
+}
+
+/// `GET /tasks/{id}/time-entries`：工时列表。
+pub async fn list_time_entries(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(task_id): Path<Uuid>,
+) -> Result<Json<Vec<TimeEntryDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    load_task_for_member(&state, user_id, task_id).await?;
+    let rows = repo::list_time_entries(&state.db, task_id).await?;
+    Ok(Json(rows.iter().map(TimeEntryDto::from).collect()))
+}
+
+/// `POST /tasks/{id}/time-entries`：登记工时。
+pub async fn create_time_entry(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(task_id): Path<Uuid>,
+    Json(input): Json<TimeEntryRequest>,
+) -> Result<(StatusCode, Json<TimeEntryDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    let task = load_task_for_member(&state, user_id, task_id).await?;
+    let board = board_of_task(&state, &task).await?;
+    ensure_board_editor(&state, &board, user_id).await?;
+    if !(1..=1440).contains(&input.minutes) {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "单条工时需为 1 ~ 1440 分钟",
+            vec![FieldError::new("minutes", "1 ~ 1440")],
+        ));
+    }
+    if input.note.chars().count() > 500 {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "备注最多 500 字",
+            vec![FieldError::new("note", "过长")],
+        ));
+    }
+    let spent_on = input.spent_on.unwrap_or_else(|| state.now().date_naive());
+    let model = repo::create_time_entry(
+        &state.db,
+        task_id,
+        user_id,
+        input.minutes,
+        input.note.trim(),
+        spent_on,
+        state.now(),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(TimeEntryDto::from(&model))))
+}
+
+/// `DELETE /time-entries/{id}`：删除工时（本人或看板管理员）。
+pub async fn delete_time_entry(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(entry_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let entry = repo::find_time_entry(&state.db, entry_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_TIME_ENTRY_NOT_FOUND", "工时记录不存在"))?;
+    let task = load_task_for_member(&state, user_id, entry.task_id).await?;
+    let board = board_of_task(&state, &task).await?;
+    if entry.user_id != user_id {
+        ensure_board_admin(&state, &board, user_id).await?;
+    } else {
+        ensure_board_editor(&state, &board, user_id).await?;
+    }
+    repo::delete_time_entry(&state.db, entry_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 燃尽参数。
+#[derive(Debug, Deserialize)]
+pub struct BurndownQuery {
+    /// 天数（默认 14，最大 90）。
+    pub days: Option<u32>,
+}
+
+/// `GET /boards/{id}/burndown`：燃尽数据。
+pub async fn board_burndown(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+    Query(query): Query<BurndownQuery>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_member(&state.db, board.project_id, user_id).await?;
+    let days = query.days.unwrap_or(14).clamp(1, 90);
+    let points = repo::burndown_points(&state.db, board_id, days, state.now()).await?;
+    let rows: Vec<Value> = points
+        .iter()
+        .map(|(date, remaining)| json!({ "date": date.to_string(), "remainingMinutes": remaining }))
+        .collect();
+    Ok(Json(json!({ "days": rows })))
+}
+
 /// 看板成员请求。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1194,6 +1342,7 @@ async fn task_dto(state: &SharedState, model: &task::Model) -> Result<TaskDto, A
     if let Some(rows) = labels.remove(&model.id) {
         dto.labels = rows.iter().map(LabelDto::from).collect();
     }
+    dto.spent_minutes = repo::spent_minutes(&state.db, model.id).await?;
     let blockers = repo::list_blockers(&state.db, model.id).await?;
     dto.blocked_by = blockers
         .iter()
@@ -1404,6 +1553,9 @@ pub struct UpdateTaskRequest {
     /// 开始时间（null 表示清空）。
     #[serde(default, deserialize_with = "double_option")]
     pub start_at: Option<Option<DateTime<Utc>>>,
+    /// 预估工时（分钟，null 清除）。
+    #[serde(default, deserialize_with = "double_option")]
+    pub estimated_minutes: Option<Option<i32>>,
 }
 
 /// `PATCH /tasks/{id}`。
@@ -1440,6 +1592,15 @@ pub async fn update_task(
     } else {
         input.assignee_id
     };
+    if let Some(estimated) = input.estimated_minutes {
+        if estimated.is_some_and(|value| !(1..=14400).contains(&value)) {
+            return Err(AppError::unprocessable(
+                "TASK_VALIDATION",
+                "预估工时需为 1 ~ 14400 分钟",
+                vec![FieldError::new("estimatedMinutes", "1 ~ 14400")],
+            ));
+        }
+    }
     let updated = repo::update_task(
         &state.db,
         &model,
@@ -1452,6 +1613,10 @@ pub async fn update_task(
         state.now(),
     )
     .await?;
+    let mut updated = updated;
+    if let Some(estimated) = input.estimated_minutes {
+        updated = repo::set_task_estimate(&state.db, &updated, estimated).await?;
+    }
     if let Some(list) = replaced {
         repo::set_task_assignees(&state.db, updated.id, &list, state.now()).await?;
         for assignee in &list {
@@ -2405,6 +2570,7 @@ pub fn router() -> Router<SharedState> {
         )
         .route("/boards/{id}/tasks", get(list_board_tasks))
         .route("/boards/{id}/sync", get(board_sync))
+        .route("/boards/{id}/burndown", get(board_burndown))
         .route(
             "/boards/{id}/templates",
             get(list_card_templates).post(create_card_template),
@@ -2412,6 +2578,14 @@ pub fn router() -> Router<SharedState> {
         .route(
             "/templates/{id}",
             axum::routing::delete(delete_card_template),
+        )
+        .route(
+            "/tasks/{id}/time-entries",
+            get(list_time_entries).post(create_time_entry),
+        )
+        .route(
+            "/time-entries/{id}",
+            axum::routing::delete(delete_time_entry),
         )
         .route(
             "/tasks/{id}/dependencies/{blocked_by_id}",

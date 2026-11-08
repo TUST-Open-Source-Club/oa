@@ -41,6 +41,9 @@ pub mod v12;
 /// v13：列 WIP 限制（P2）。
 pub mod v13;
 
+/// v14：工时记录与预估工时（P2）。
+pub mod v14;
+
 /// 迁移入口。
 pub struct Migrator;
 
@@ -61,6 +64,7 @@ impl MigratorTrait for Migrator {
             Box::new(v11::Migration),
             Box::new(v12::Migration),
             Box::new(v13::Migration),
+            Box::new(v14::Migration),
         ]
     }
 }

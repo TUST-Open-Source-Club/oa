@@ -31,6 +31,8 @@ interface TaskItem {
   coverAttachmentId?: string | null
   coverUrl?: string | null
   blockedBy?: Array<{ id: string; title: string; status: string }>
+  estimatedMinutes?: number | null
+  spentMinutes?: number
 }
 interface UserItem { id: string; username: string; nickname: string; department: string | null }
 interface AttachmentItem { id: string; name: string; size: number; mime: string; createdAt: string }
@@ -47,6 +49,12 @@ const draftLabelIds = ref<string[]>([])
 const filters = reactive({ q: '', assigneeId: '', labelId: '', due: '' })
 const archivedOpen = ref(false)
 const archivedTasks = ref<TaskItem[]>([])
+const timeEntries = ref<Array<{ id: string; userId: string; minutes: number; note: string; spentOn: string; createdAt: string }>>([])
+const entryMinutes = ref('')
+const entryNote = ref('')
+const estimateInput = ref('')
+const burndownOpen = ref(false)
+const burndownPoints = ref<Array<{ date: string; remainingMinutes: number }>>([])
 const quickAddTitle = ref('')
 const currentCoverId = ref<string | null>(null)
 const syncCursor = ref('')
@@ -291,6 +299,80 @@ const dependencyCandidates = computed(() =>
   tasks.value.filter((task) => task.id !== editingId.value),
 )
 
+/** 加载工时记录。 */
+async function loadTimeEntries(taskId: string) {
+  timeEntries.value = await api(`tasks/${taskId}/time-entries`)
+  await resolveUsers(timeEntries.value.map((row) => row.userId))
+}
+
+/** 登记工时。 */
+async function addTimeEntry() {
+  const minutes = Number(entryMinutes.value)
+  if (!editingId.value || !Number.isInteger(minutes) || minutes < 1) return
+  await api(`tasks/${editingId.value}/time-entries`, {
+    method: 'POST',
+    body: { minutes, note: entryNote.value.trim() },
+  })
+  entryMinutes.value = ''
+  entryNote.value = ''
+  await loadTimeEntries(editingId.value)
+  await refreshTask(editingId.value)
+}
+
+/** 删除工时。 */
+async function removeTimeEntry(entryId: string) {
+  await api(`time-entries/${entryId}`, { method: 'DELETE' })
+  if (editingId.value) {
+    await loadTimeEntries(editingId.value)
+    await refreshTask(editingId.value)
+  }
+}
+
+/** 保存预估工时。 */
+async function saveEstimate() {
+  if (!editingId.value) return
+  const raw = estimateInput.value.trim()
+  const value = raw === '' ? null : Number(raw)
+  if (value !== null && (!Number.isInteger(value) || value < 1 || value > 14400)) {
+    message.value = '预估工时需为 1 ~ 14400 分钟'
+    return
+  }
+  await api(`tasks/${editingId.value}`, { method: 'PATCH', body: { estimatedMinutes: value } })
+  await refreshTask(editingId.value)
+}
+
+/** 用最新数据刷新单张卡片。 */
+async function refreshTask(taskId: string) {
+  const refreshed = await api<TaskItem>(`tasks/${taskId}`)
+  const index = tasks.value.findIndex((item) => item.id === taskId)
+  if (index >= 0) tasks.value[index] = refreshed
+}
+
+/** 打开燃尽图。 */
+async function openBurndown() {
+  if (!boardId.value) return
+  const data = await api<{ days: Array<{ date: string; remainingMinutes: number }> }>(
+    `boards/${boardId.value}/burndown`,
+    { params: { days: 14 } },
+  )
+  burndownPoints.value = data.days
+  burndownOpen.value = true
+}
+
+/** 燃尽折线（viewBox 320x120）。 */
+const burndownPath = computed(() => {
+  const points = burndownPoints.value
+  if (!points.length) return ''
+  const max = Math.max(1, ...points.map((row) => row.remainingMinutes))
+  return points
+    .map((row, index) => {
+      const x = points.length === 1 ? 0 : (index / (points.length - 1)) * 300 + 10
+      const y = 110 - (row.remainingMinutes / max) * 90
+      return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+})
+
 /** 加载任务评论。 */
 async function loadComments(taskId: string) {
   comments.value = await api<Array<{ id: string; authorId: string; contentMd: string; createdAt: string }>>(
@@ -498,6 +580,8 @@ function openEdit(task: TaskItem) {
   void router.replace({ query: { ...route.query, card: task.id } })
   void loadAttachments(task.id).catch(() => undefined)
   void loadComments(task.id).catch(() => undefined)
+  void loadTimeEntries(task.id).catch(() => undefined)
+  estimateInput.value = task.estimatedMinutes ? String(task.estimatedMinutes) : ''
 }
 
 /** 保存（新建或编辑）。 */
@@ -1180,6 +1264,57 @@ onUnmounted(() => {
         </div>
 
         <div v-if="editingId" class="rounded-[var(--radius-field)] border border-[var(--border)] p-3">
+          <p class="mb-1.5 text-[11px] font-medium text-neutral-500">工时</p>
+          <div class="mb-2 flex items-center gap-2 text-[12px] text-neutral-500">
+            <span>预估</span>
+            <input
+              v-model="estimateInput"
+              type="number"
+              min="1"
+              max="14400"
+              placeholder="分钟"
+              class="h-7 w-24 rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[12px] outline-none focus:border-primary-500"
+            />
+            <Button size="sm" variant="secondary" @click="saveEstimate">保存</Button>
+            <span class="ml-auto">
+              已记 {{ tasks.find((item) => item.id === editingId)?.spentMinutes ?? 0 }} 分钟
+              <template v-if="tasks.find((item) => item.id === editingId)?.estimatedMinutes">
+                / 预估 {{ tasks.find((item) => item.id === editingId)!.estimatedMinutes }} 分钟
+              </template>
+            </span>
+          </div>
+          <ul v-if="timeEntries.length" class="mb-2 space-y-1">
+            <li
+              v-for="entry in timeEntries"
+              :key="entry.id"
+              class="flex items-center justify-between gap-2 text-[11px] text-neutral-500"
+            >
+              <span class="min-w-0 flex-1 truncate">
+                {{ users[entry.userId]?.nickname ?? '成员' }} · {{ entry.spentOn }} · {{ entry.minutes }} 分钟
+                <template v-if="entry.note"> · {{ entry.note }}</template>
+              </span>
+              <button class="shrink-0 text-neutral-400 hover:text-danger-600" @click="removeTimeEntry(entry.id)">删除</button>
+            </li>
+          </ul>
+          <div class="flex items-center gap-1">
+            <input
+              v-model="entryMinutes"
+              type="number"
+              min="1"
+              max="1440"
+              placeholder="分钟"
+              class="h-7 w-20 rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[11px] outline-none focus:border-primary-500"
+            />
+            <input
+              v-model="entryNote"
+              placeholder="备注（可选）"
+              class="h-7 flex-1 rounded-[var(--radius-field)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[11px] outline-none focus:border-primary-500"
+            />
+            <Button size="sm" :disabled="!entryMinutes" @click="addTimeEntry">记一笔</Button>
+          </div>
+        </div>
+
+        <div v-if="editingId" class="rounded-[var(--radius-field)] border border-[var(--border)] p-3">
           <p class="mb-1.5 text-[11px] font-medium text-neutral-500">评论（{{ comments.length }}）</p>
           <ul v-if="comments.length" class="mb-2 space-y-1.5">
             <li v-for="comment in comments" :key="comment.id" class="text-[12px]">
@@ -1288,6 +1423,27 @@ onUnmounted(() => {
       </ul>
       <template #footer>
         <Button variant="secondary" @click="archivedOpen = false">关闭</Button>
+      </template>
+    </AppModal>
+
+    <!-- 燃尽图 -->
+    <AppModal :open="burndownOpen" title="燃尽（近 14 天剩余预估）" @close="burndownOpen = false">
+      <p v-if="!burndownPoints.length" class="py-6 text-center text-[12px] text-neutral-400">
+        还没有预估工时，先给卡片填「预估」
+      </p>
+      <template v-else>
+        <svg viewBox="0 0 320 120" class="h-40 w-full">
+          <line x1="10" y1="110" x2="310" y2="110" stroke="var(--border)" stroke-width="1" />
+          <path :d="burndownPath" fill="none" stroke="#5E6AD2" stroke-width="2" />
+        </svg>
+        <div class="flex justify-between text-[10px] text-neutral-400">
+          <span>{{ burndownPoints[0]?.date }}</span>
+          <span>{{ burndownPoints[burndownPoints.length - 1]?.remainingMinutes }} 分钟</span>
+          <span>{{ burndownPoints[burndownPoints.length - 1]?.date }}</span>
+        </div>
+      </template>
+      <template #footer>
+        <Button variant="secondary" @click="burndownOpen = false">关闭</Button>
       </template>
     </AppModal>
 

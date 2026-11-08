@@ -11,7 +11,7 @@ use club_common::{new_id, AppError};
 
 use crate::entity::{
     board, board_member, card_template, column, comment, label, project, project_member, subtask,
-    task, task_assignee, task_dependency, task_label,
+    task, task_assignee, task_dependency, task_label, task_time_entry,
 };
 
 /// 数据库错误 → 统一错误。
@@ -260,6 +260,7 @@ pub async fn create_task(
         created_by: Set(user_id),
         status: Set("active".to_string()),
         completed_at: Set(None),
+        estimated_minutes: Set(None),
         due_reminded_at: Set(None),
         cover_attachment_id: Set(None),
         archived_at: Set(None),
@@ -697,6 +698,7 @@ pub async fn restore_task(
             .unwrap_or(0)),
         created_by: Set(fallback_created_by),
         archived_at: Set(None),
+        estimated_minutes: Set(None),
         due_reminded_at: Set(None),
         cover_attachment_id: Set(None),
         status: Set(snapshot
@@ -1382,4 +1384,124 @@ pub async fn rename_column(
     let mut active: column::ActiveModel = column.clone().into();
     active.name = Set(name.to_string());
     active.update(db).await.map_err(map_db_err)
+}
+
+/// 设置预估工时（分钟）。
+pub async fn set_task_estimate(
+    db: &DatabaseConnection,
+    model: &task::Model,
+    minutes: Option<i32>,
+) -> Result<task::Model, AppError> {
+    let mut active: task::ActiveModel = model.clone().into();
+    active.estimated_minutes = Set(minutes);
+    active.update(db).await.map_err(map_db_err)
+}
+
+/// 新增工时记录。
+pub async fn create_time_entry(
+    db: &DatabaseConnection,
+    task_id: Uuid,
+    user_id: Uuid,
+    minutes: i32,
+    note: &str,
+    spent_on: chrono::NaiveDate,
+    now: DateTime<Utc>,
+) -> Result<task_time_entry::Model, AppError> {
+    task_time_entry::ActiveModel {
+        id: Set(new_id()),
+        task_id: Set(task_id),
+        user_id: Set(user_id),
+        minutes: Set(minutes),
+        note: Set(note.to_string()),
+        spent_on: Set(spent_on),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}
+
+/// 任务工时记录。
+pub async fn list_time_entries(
+    db: &DatabaseConnection,
+    task_id: Uuid,
+) -> Result<Vec<task_time_entry::Model>, AppError> {
+    task_time_entry::Entity::find()
+        .filter(task_time_entry::Column::TaskId.eq(task_id))
+        .order_by_desc(task_time_entry::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 查一条工时记录。
+pub async fn find_time_entry(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> Result<Option<task_time_entry::Model>, AppError> {
+    task_time_entry::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 删除工时记录。
+pub async fn delete_time_entry(db: &DatabaseConnection, id: Uuid) -> Result<(), AppError> {
+    task_time_entry::Entity::delete_by_id(id)
+        .exec(db)
+        .await
+        .map(|_| ())
+        .map_err(map_db_err)
+}
+
+/// 任务已登记工时合计（分钟）。
+pub async fn spent_minutes(db: &DatabaseConnection, task_id: Uuid) -> Result<i64, AppError> {
+    let rows = task_time_entry::Entity::find()
+        .filter(task_time_entry::Column::TaskId.eq(task_id))
+        .all(db)
+        .await
+        .map_err(map_db_err)?;
+    Ok(rows.iter().map(|row| i64::from(row.minutes)).sum())
+}
+
+/// 看板燃尽：最近 `days` 天每日剩余预估分钟。
+pub async fn burndown_points(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+    days: u32,
+    now: DateTime<Utc>,
+) -> Result<Vec<(chrono::NaiveDate, i64)>, AppError> {
+    let columns = list_columns_by_board(db, board_id).await?;
+    let ids: Vec<Uuid> = columns.iter().map(|column| column.id).collect();
+    let tasks = if ids.is_empty() {
+        Vec::new()
+    } else {
+        task::Entity::find()
+            .filter(task::Column::ColumnId.is_in(ids))
+            .filter(task::Column::Status.ne("terminated"))
+            .all(db)
+            .await
+            .map_err(map_db_err)?
+    };
+    let today = now.date_naive();
+    let mut points = Vec::with_capacity(days as usize);
+    for offset in (0..days).rev() {
+        let date = today - chrono::Duration::days(i64::from(offset));
+        let cutoff = date
+            .and_hms_opt(23, 59, 59)
+            .unwrap()
+            .and_utc()
+            .fixed_offset();
+        let remaining: i64 = tasks
+            .iter()
+            .filter(|row| row.created_at <= cutoff)
+            .filter(|row| match row.completed_at {
+                Some(done) => done > cutoff,
+                None => true,
+            })
+            .map(|row| i64::from(row.estimated_minutes.unwrap_or(0)))
+            .sum();
+        points.push((date, remaining));
+    }
+    Ok(points)
 }

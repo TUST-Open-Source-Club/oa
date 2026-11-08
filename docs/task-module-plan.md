@@ -209,3 +209,16 @@ GET        /tasks/{id}/activity
 测试：`wip_flow.rs` 1 条；task-service 34 条全绿。
 
 **P2 剩余**：泳道、工时与燃尽、自动化规则、导入导出（Planka 迁移）。
+
+## 已完成（P2 第 3 项 · 工时与燃尽）
+
+- 迁移 v14：`tasks.estimated_minutes` + `task_time_entries`（分钟/备注/工作日期）；
+- `PATCH /tasks/{id}` 支持 `estimatedMinutes`（1~14400，null 清除）；
+- `GET/POST /tasks/{id}/time-entries`、`DELETE /time-entries/{id}`（本人或看板管理员）；
+  任务 DTO 带 `estimatedMinutes` 与 `spentMinutes`；
+- `GET /boards/{id}/burndown?days=` 每日剩余预估分钟（完成的任务不计）；
+- 前端：抽屉「工时」区块（预估保存、已记/预估、登记与删除）、看板「燃尽」弹窗（SVG 折线）。
+
+测试：`time_tracking_flow.rs` 2 条；task-service 36 条全绿。
+
+**P2 剩余**：泳道、自动化规则、导入导出（Planka 迁移）。

@@ -124,8 +124,16 @@ async fn estimate_and_time_entries() {
     assert_eq!(list.as_array().unwrap().len(), 2);
     assert_eq!(detail(&app, &token, &task).await["spentMinutes"], 90);
 
-    // 删除一条
-    let entry_id = list[0]["id"].as_str().unwrap().to_string();
+    // 删除 60 分钟那条
+    let entry_id = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["minutes"] == 60)
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     request(
         &app.app,
         "DELETE",
