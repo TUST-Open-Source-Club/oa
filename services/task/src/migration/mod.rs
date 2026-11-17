@@ -47,6 +47,9 @@ pub mod v14;
 /// v15：看板泳道设置（P2）。
 pub mod v15;
 
+/// v16：看板自动化规则（P2）。
+pub mod v16;
+
 /// 迁移入口。
 pub struct Migrator;
 
@@ -69,6 +72,7 @@ impl MigratorTrait for Migrator {
             Box::new(v13::Migration),
             Box::new(v14::Migration),
             Box::new(v15::Migration),
+            Box::new(v16::Migration),
         ]
     }
 }

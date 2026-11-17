@@ -55,6 +55,9 @@ const entryNote = ref('')
 const estimateInput = ref('')
 const burndownOpen = ref(false)
 const burndownPoints = ref<Array<{ date: string; remainingMinutes: number }>>([])
+const automationsOpen = ref(false)
+const automationRules = ref<Array<{ id: string; trigger: string; action: string; labelId: string | null }>>([])
+const automationDraft = reactive({ trigger: 'task.completed', action: 'add_label', labelId: '' })
 const quickAddTitle = ref('')
 const currentCoverId = ref<string | null>(null)
 const syncCursor = ref('')
@@ -516,6 +519,45 @@ async function editWipLimit(column: ColumnItem) {
   }
   await api(`columns/${column.id}`, { method: 'PATCH', body: { wipLimit } })
   await loadBoard()
+}
+
+/** 打开自动化规则。 */
+async function openAutomations() {
+  if (!boardId.value) return
+  automationRules.value = await api(`boards/${boardId.value}/automations`)
+  automationsOpen.value = true
+}
+
+/** 新建自动化规则。 */
+async function addAutomation() {
+  if (!boardId.value) return
+  if (automationDraft.action === 'add_label' && !automationDraft.labelId) {
+    message.value = 'add_label 需要选择一个标签'
+    return
+  }
+  await api(`boards/${boardId.value}/automations`, {
+    method: 'POST',
+    body: {
+      trigger: automationDraft.trigger,
+      action: automationDraft.action,
+      labelId: automationDraft.action === 'add_label' ? automationDraft.labelId : null,
+    },
+  })
+  automationRules.value = await api(`boards/${boardId.value}/automations`)
+}
+
+/** 删除自动化规则。 */
+async function removeAutomation(ruleId: string) {
+  await api(`automations/${ruleId}`, { method: 'DELETE' })
+  if (boardId.value) automationRules.value = await api(`boards/${boardId.value}/automations`)
+}
+
+/** 规则文案。 */
+function automationText(trigger: string, action: string, labelId: string | null) {
+  const when = trigger === 'task.completed' ? '卡片完成时' : '卡片创建时'
+  if (action === 'notify_assignees') return `${when} → 通知负责人`
+  const label = labels.value.find((item) => item.id === labelId)?.name ?? '标签'
+  return `${when} → 打标签「${label}」`
 }
 
 /** 切换泳道模式。 */
@@ -1500,6 +1542,47 @@ onUnmounted(() => {
       </ul>
       <template #footer>
         <Button variant="secondary" @click="archivedOpen = false">关闭</Button>
+      </template>
+    </AppModal>
+
+    <!-- 自动化规则 -->
+    <AppModal :open="automationsOpen" title="自动化规则" @close="automationsOpen = false">
+      <p v-if="!automationRules.length" class="mb-2 text-[11px] text-neutral-400">
+        还没有规则。示例：卡片完成时打「已完成」标签，或通知负责人。
+      </p>
+      <ul v-else class="mb-3 space-y-1">
+        <li
+          v-for="rule in automationRules"
+          :key="rule.id"
+          class="flex items-center justify-between gap-2 rounded-[var(--radius-field)] border border-[var(--border)] px-2 py-1.5 text-[12px]"
+        >
+          <span class="min-w-0 flex-1 truncate">{{ automationText(rule.trigger, rule.action, rule.labelId) }}</span>
+          <button class="shrink-0 text-[11px] text-neutral-400 hover:text-danger-600" @click="removeAutomation(rule.id)">删除</button>
+        </li>
+      </ul>
+      <div class="space-y-2 rounded-[var(--radius-field)] border border-[var(--border)] p-2.5">
+        <div class="flex items-center gap-2">
+          <select v-model="automationDraft.trigger" class="h-7 flex-1 rounded border border-[var(--border)] bg-[var(--surface)] px-1 text-[11px]">
+            <option value="task.completed">卡片完成时</option>
+            <option value="task.created">卡片创建时</option>
+          </select>
+          <select v-model="automationDraft.action" class="h-7 flex-1 rounded border border-[var(--border)] bg-[var(--surface)] px-1 text-[11px]">
+            <option value="add_label">打标签</option>
+            <option value="notify_assignees">通知负责人</option>
+          </select>
+          <select
+            v-if="automationDraft.action === 'add_label'"
+            v-model="automationDraft.labelId"
+            class="h-7 flex-1 rounded border border-[var(--border)] bg-[var(--surface)] px-1 text-[11px]"
+          >
+            <option value="">选择标签</option>
+            <option v-for="label in labels" :key="label.id" :value="label.id">{{ label.name }}</option>
+          </select>
+        </div>
+        <Button size="sm" @click="addAutomation">添加规则</Button>
+      </div>
+      <template #footer>
+        <Button variant="secondary" @click="automationsOpen = false">关闭</Button>
       </template>
     </AppModal>
 

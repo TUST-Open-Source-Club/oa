@@ -233,3 +233,16 @@ GET        /tasks/{id}/activity
 测试：`swimlane_flow.rs` 1 条；task-service 37 条全绿。
 
 **P2 剩余**：自动化规则、导入导出（Planka 迁移）。
+
+## 已完成（P2 第 5 项 · 自动化规则）
+
+- 迁移 v16：`automation_rules(board_id, trigger, action, label_id)`；
+- `GET/POST /boards/{id}/automations`、`DELETE /automations/{id}`（看板管理员）；
+- trigger：`task.completed` / `task.created`；action：`add_label` / `notify_assignees`；
+- 完成卡片或新建卡片时执行规则：自动打标签、给负责人发 `task.rule_triggered`
+  （排除操作者）；非法 trigger/action/缺 labelId 422；
+- 前端：看板「自动化」弹窗（规则列表 + 触发器/动作/标签选择 + 删除）。
+
+测试：`automations_flow.rs` 2 条；task-service 39 条全绿。
+
+**P2 剩余**：导入导出（Planka 迁移）。

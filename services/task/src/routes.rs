@@ -981,6 +981,172 @@ pub async fn board_burndown(
     Ok(Json(json!({ "days": rows })))
 }
 
+/// 自动化规则 DTO。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationDto {
+    /// ID。
+    pub id: String,
+    /// 触发。
+    pub trigger: String,
+    /// 动作。
+    pub action: String,
+    /// 参数标签。
+    pub label_id: Option<String>,
+}
+
+impl From<&crate::entity::automation_rule::Model> for AutomationDto {
+    fn from(model: &crate::entity::automation_rule::Model) -> Self {
+        Self {
+            id: model.id.to_string(),
+            trigger: model.trigger.clone(),
+            action: model.action.clone(),
+            label_id: model.label_id.map(|id| id.to_string()),
+        }
+    }
+}
+
+/// 自动化规则请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRequest {
+    /// 触发：task.completed / task.created。
+    pub trigger: String,
+    /// 动作：add_label / notify_assignees。
+    pub action: String,
+    /// add_label 的标签。
+    pub label_id: Option<Uuid>,
+}
+
+/// `GET /boards/{id}/automations`：规则列表。
+pub async fn list_automations(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+) -> Result<Json<Vec<AutomationDto>>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_member(&state.db, board.project_id, user_id).await?;
+    let rules = repo::list_automation_rules(&state.db, board_id).await?;
+    Ok(Json(rules.iter().map(AutomationDto::from).collect()))
+}
+
+/// `POST /boards/{id}/automations`：新建规则（看板管理员）。
+pub async fn create_automation(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+    Json(input): Json<AutomationRequest>,
+) -> Result<(StatusCode, Json<AutomationDto>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    ensure_board_admin(&state, &board, user_id).await?;
+    if !["task.completed", "task.created"].contains(&input.trigger.as_str()) {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "触发条件不合法",
+            vec![FieldError::new("trigger", "task.completed/task.created")],
+        ));
+    }
+    if !["add_label", "notify_assignees"].contains(&input.action.as_str()) {
+        return Err(AppError::unprocessable(
+            "TASK_VALIDATION",
+            "动作不合法",
+            vec![FieldError::new("action", "add_label/notify_assignees")],
+        ));
+    }
+    if input.action == "add_label" {
+        let label_id = input.label_id.ok_or_else(|| {
+            AppError::unprocessable(
+                "TASK_VALIDATION",
+                "add_label 需要 labelId",
+                vec![FieldError::new("labelId", "不能为空")],
+            )
+        })?;
+        let label = repo::find_label(&state.db, label_id)
+            .await?
+            .ok_or_else(|| AppError::not_found("TASK_LABEL_NOT_FOUND", "标签不存在"))?;
+        if label.board_id != board.id {
+            return Err(AppError::unprocessable(
+                "TASK_VALIDATION",
+                "标签不属于该看板",
+                vec![FieldError::new("labelId", "跨看板")],
+            ));
+        }
+    }
+    let rule = repo::create_automation_rule(
+        &state.db,
+        board.id,
+        &input.trigger,
+        &input.action,
+        input.label_id,
+        state.now(),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(AutomationDto::from(&rule))))
+}
+
+/// `DELETE /automations/{id}`：删除规则（看板管理员）。
+pub async fn delete_automation(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(rule_id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let rule = repo::find_automation_rule(&state.db, rule_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_AUTOMATION_NOT_FOUND", "规则不存在"))?;
+    let board = load_board(&state, rule.board_id).await?;
+    ensure_board_admin(&state, &board, user_id).await?;
+    repo::delete_automation_rule(&state.db, rule_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 执行看板自动化规则。
+async fn run_automations(
+    state: &SharedState,
+    board: &board::Model,
+    task: &task::Model,
+    trigger: &str,
+    actor: Uuid,
+) {
+    let Ok(rules) = repo::list_automation_rules(&state.db, board.id).await else {
+        return;
+    };
+    for rule in rules.iter().filter(|rule| rule.trigger == trigger) {
+        match rule.action.as_str() {
+            "add_label" => {
+                if let Some(label_id) = rule.label_id {
+                    let _ = repo::attach_label(&state.db, task.id, label_id).await;
+                }
+            }
+            "notify_assignees" => {
+                let mut targets = repo::list_task_assignees(&state.db, task.id)
+                    .await
+                    .unwrap_or_default();
+                if targets.is_empty() {
+                    targets.extend(task.assignee_id);
+                }
+                targets.retain(|id| *id != actor);
+                targets.sort();
+                targets.dedup();
+                enqueue_event(
+                    state,
+                    "task.rule_triggered",
+                    actor,
+                    targets,
+                    task.id,
+                    "自动化规则触发",
+                    &task.title,
+                    "normal",
+                )
+                .await;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// 看板成员请求。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1519,6 +1685,9 @@ async fn create_task_core(
             .await;
         }
     }
+    if let Some(board) = repo::find_board(&state.db, column.board_id).await? {
+        run_automations(state, &board, &model, "task.created", user_id).await;
+    }
     Ok((StatusCode::CREATED, Json(task_dto(state, &model).await?)))
 }
 
@@ -1728,6 +1897,10 @@ pub async fn update_task_status(
         state.now(),
     )
     .await;
+    if input.status == "done" {
+        let board = board_of_task(&state, &updated).await?;
+        run_automations(&state, &board, &updated, "task.completed", user_id).await;
+    }
     if matches!(input.status.as_str(), "done" | "terminated") {
         let mut targets = repo::list_task_assignees(&state.db, updated.id).await?;
         if targets.is_empty() {
@@ -2594,6 +2767,14 @@ pub fn router() -> Router<SharedState> {
         .route("/boards/{id}/tasks", get(list_board_tasks))
         .route("/boards/{id}/sync", get(board_sync))
         .route("/boards/{id}/burndown", get(board_burndown))
+        .route(
+            "/boards/{id}/automations",
+            get(list_automations).post(create_automation),
+        )
+        .route(
+            "/automations/{id}",
+            axum::routing::delete(delete_automation),
+        )
         .route(
             "/boards/{id}/templates",
             get(list_card_templates).post(create_card_template),

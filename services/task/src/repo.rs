@@ -10,8 +10,8 @@ use uuid::Uuid;
 use club_common::{new_id, AppError};
 
 use crate::entity::{
-    board, board_member, card_template, column, comment, label, project, project_member, subtask,
-    task, task_assignee, task_dependency, task_label, task_time_entry,
+    automation_rule, board, board_member, card_template, column, comment, label, project,
+    project_member, subtask, task, task_assignee, task_dependency, task_label, task_time_entry,
 };
 
 /// 数据库错误 → 统一错误。
@@ -1517,4 +1517,62 @@ pub async fn set_board_swimlane(
     let mut active: board::ActiveModel = model.clone().into();
     active.swimlane = Set(swimlane.to_string());
     active.update(db).await.map_err(map_db_err)
+}
+
+/// 看板自动化规则。
+pub async fn list_automation_rules(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+) -> Result<Vec<automation_rule::Model>, AppError> {
+    automation_rule::Entity::find()
+        .filter(automation_rule::Column::BoardId.eq(board_id))
+        .order_by_asc(automation_rule::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 新建自动化规则。
+pub async fn create_automation_rule(
+    db: &DatabaseConnection,
+    board_id: Uuid,
+    trigger: &str,
+    action: &str,
+    label_id: Option<Uuid>,
+    now: DateTime<Utc>,
+) -> Result<automation_rule::Model, AppError> {
+    automation_rule::ActiveModel {
+        id: Set(new_id()),
+        board_id: Set(board_id),
+        trigger: Set(trigger.to_string()),
+        action: Set(action.to_string()),
+        label_id: Set(label_id),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}
+
+/// 查规则。
+pub async fn find_automation_rule(
+    db: &DatabaseConnection,
+    rule_id: Uuid,
+) -> Result<Option<automation_rule::Model>, AppError> {
+    automation_rule::Entity::find_by_id(rule_id)
+        .one(db)
+        .await
+        .map_err(map_db_err)
+}
+
+/// 删除规则。
+pub async fn delete_automation_rule(
+    db: &DatabaseConnection,
+    rule_id: Uuid,
+) -> Result<(), AppError> {
+    automation_rule::Entity::delete_by_id(rule_id)
+        .exec(db)
+        .await
+        .map(|_| ())
+        .map_err(map_db_err)
 }

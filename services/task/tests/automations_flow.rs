@@ -307,9 +307,5 @@ async fn created_rule_and_validation() {
         None,
     )
     .await;
-    assert!(list
-        .expect(StatusCode::OK)
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(list.expect(StatusCode::OK).as_array().unwrap().is_empty());
 }

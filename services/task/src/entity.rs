@@ -478,3 +478,34 @@ pub mod task_time_entry {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// 看板自动化规则。
+pub mod automation_rule {
+    use sea_orm::entity::prelude::*;
+
+    /// 规则模型。
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "automation_rules")]
+    pub struct Model {
+        /// ID。
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: Uuid,
+        /// 看板。
+        pub board_id: Uuid,
+        /// 触发：task.completed / task.created。
+        pub trigger: String,
+        /// 动作：add_label / notify_assignees。
+        pub action: String,
+        /// 动作参数：标签。
+        #[sea_orm(nullable)]
+        pub label_id: Option<Uuid>,
+        /// 创建时间。
+        pub created_at: DateTimeWithTimeZone,
+    }
+
+    /// 关系。
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
