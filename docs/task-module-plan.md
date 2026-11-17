@@ -246,3 +246,24 @@ GET        /tasks/{id}/activity
 测试：`automations_flow.rs` 2 条；task-service 39 条全绿。
 
 **P2 剩余**：导入导出（Planka 迁移）。
+
+## 已完成（P2 第 6 项 · 导入导出）
+
+- `GET /boards/{id}/export` → `{format: "club-oa.task/board", version, board, columns,
+  labels, tasks}`（卡片带列名、标签名、负责人、截止、预估）；
+- `POST /projects/{id}/import`：支持本服务导出格式往返，也兼容 Planka 的
+  `lists/cards`（按 `listName` 定位列、`labelNames` 打标签）；项目管理员可用；
+- 前端：看板「导出」下载 JSON、「导入」选择 JSON 文件（兼容 Planka 导出）。
+
+测试：`import_export_flow.rs` 2 条；task-service 41 条全绿。
+
+## 任务模块 P2 完成情况
+
+| 项 | 状态 |
+|---|---|
+| 卡片依赖 | ✅ |
+| WIP 限制 | ✅ |
+| 工时与燃尽 | ✅ |
+| 泳道 | ✅ |
+| 自动化规则 | ✅ |
+| 导入导出 | ✅ |

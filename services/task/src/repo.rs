@@ -1576,3 +1576,34 @@ pub async fn delete_automation_rule(
         .map(|_| ())
         .map_err(map_db_err)
 }
+
+/// 建列（可指定是否完成列），位置自动排到末尾。
+pub async fn create_column_with(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+    board_id: Uuid,
+    name: &str,
+    is_done: bool,
+    now: DateTime<Utc>,
+) -> Result<column::Model, AppError> {
+    let max = column::Entity::find()
+        .filter(column::Column::BoardId.eq(board_id))
+        .order_by_desc(column::Column::Position)
+        .one(db)
+        .await
+        .map_err(map_db_err)?
+        .map(|row| row.position);
+    column::ActiveModel {
+        id: Set(new_id()),
+        project_id: Set(project_id),
+        board_id: Set(board_id),
+        name: Set(name.to_string()),
+        position: Set(max.unwrap_or(0) + 1),
+        is_done: Set(is_done),
+        wip_limit: Set(None),
+        created_at: Set(now.fixed_offset()),
+    }
+    .insert(db)
+    .await
+    .map_err(map_db_err)
+}

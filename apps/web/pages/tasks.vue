@@ -560,6 +560,46 @@ function automationText(trigger: string, action: string, labelId: string | null)
   return `${when} → 打标签「${label}」`
 }
 
+/** 导出当前看板为 JSON 文件。 */
+async function exportBoard() {
+  if (!boardId.value) return
+  const response = await fetch(`/api/task/boards/${boardId.value}/export`, {
+    headers: auth.authHeaders(),
+  })
+  if (!response.ok) {
+    message.value = '导出失败'
+    return
+  }
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `board-${boardId.value}.json`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+/** 从 JSON 文件导入看板（Planka 导出可直接用）。 */
+async function importBoard(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !projectId.value) return
+  try {
+    const payload = JSON.parse(await file.text())
+    const result = await api<{ boardId: string; tasks: number }>(
+      `projects/${projectId.value}/import`,
+      { method: 'POST', body: payload },
+    )
+    await loadBoards()
+    boardId.value = result.boardId
+    await loadBoard()
+    message.value = `已导入 ${result.tasks} 张卡片`
+  } catch (error) {
+    message.value = apiErrorMessage(error, '导入失败，请检查 JSON 格式')
+  }
+}
+
 /** 切换泳道模式。 */
 async function setSwimlane(mode: string) {
   if (!boardId.value) return

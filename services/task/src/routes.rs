@@ -1147,6 +1147,262 @@ async fn run_automations(
     }
 }
 
+/// `GET /boards/{id}/export`：导出看板 JSON。
+pub async fn export_board(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(board_id): Path<Uuid>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let board = load_board(&state, board_id).await?;
+    repo::ensure_member(&state.db, board.project_id, user_id).await?;
+    let columns = repo::list_columns_by_board(&state.db, board_id).await?;
+    let labels = repo::list_labels(&state.db, board_id).await?;
+    let filter = repo::TaskFilter::default();
+    let tasks = repo::list_tasks_by_board(&state.db, board_id, &filter, state.now()).await?;
+    let mut task_rows = Vec::with_capacity(tasks.len());
+    for model in &tasks {
+        let dto = task_dto(&state, model).await?;
+        task_rows.push(json!({
+            "title": dto.title,
+            "descriptionMd": dto.description_md,
+            "priority": dto.priority,
+            "dueAt": dto.due_at,
+            "startAt": dto.start_at,
+            "estimatedMinutes": dto.estimated_minutes,
+            "column": columns
+                .iter()
+                .find(|column| column.id.to_string() == dto.column_id)
+                .map(|column| column.name.clone())
+                .unwrap_or_default(),
+            "labels": dto.labels.iter().map(|label| label.name.clone()).collect::<Vec<_>>(),
+            "assigneeIds": dto.assignee_ids,
+        }));
+    }
+    let column_rows: Vec<Value> = columns
+        .iter()
+        .map(|column| {
+            json!({
+                "name": column.name,
+                "position": column.position,
+                "isDone": column.is_done,
+                "wipLimit": column.wip_limit,
+            })
+        })
+        .collect();
+    let label_rows: Vec<Value> = labels
+        .iter()
+        .map(|label| json!({ "name": label.name, "color": label.color }))
+        .collect();
+    Ok(Json(json!({
+        "format": "club-oa.task/board",
+        "version": 1,
+        "board": { "name": board.name, "swimlane": board.swimlane },
+        "columns": column_rows,
+        "labels": label_rows,
+        "tasks": task_rows,
+    })))
+}
+
+/// 导入看板（接受本服务导出格式或 Planka 导出）。
+pub async fn import_board(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(project_id): Path<Uuid>,
+    Json(input): Json<Value>,
+) -> Result<(StatusCode, Json<Value>), AppError> {
+    let user_id = user_id_of(&auth)?;
+    let project = repo::find_project(&state.db, project_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("TASK_PROJECT_NOT_FOUND", "项目不存在"))?;
+    ensure_project_admin(&state, &project, user_id).await?;
+
+    let board_name = input["board"]["name"]
+        .as_str()
+        .or_else(|| input["boardName"].as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("导入看板")
+        .to_string();
+
+    // 列：columns（本服务格式）或 lists（Planka）；按 position 排序后依次创建
+    let mut columns: Vec<(String, i64, bool, Option<i32>)> = input["columns"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .map(|row| {
+                    (
+                        row["name"].as_str().unwrap_or("列").to_string(),
+                        row["position"].as_i64().unwrap_or(0),
+                        row["isDone"].as_bool().unwrap_or(false),
+                        row["wipLimit"].as_i64().map(|value| value as i32),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            input["lists"]
+                .as_array()
+                .map(|rows| {
+                    rows.iter()
+                        .map(|row| {
+                            (
+                                row["name"].as_str().unwrap_or("列").to_string(),
+                                row["position"].as_i64().unwrap_or(0),
+                                false,
+                                None,
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        });
+    columns.sort_by_key(|column| column.1);
+    if columns.is_empty() {
+        columns = vec![
+            ("待办".to_string(), 1, false, None),
+            ("进行中".to_string(), 2, false, None),
+            ("已完成".to_string(), 3, true, None),
+        ];
+    }
+
+    let board = repo::create_board(&state.db, project_id, &board_name, state.now()).await?;
+    let mut column_ids: std::collections::HashMap<String, Uuid> = std::collections::HashMap::new();
+    for (name, _, is_done, wip_limit) in &columns {
+        let mut column =
+            repo::create_column_with(&state.db, project_id, board.id, name, *is_done, state.now())
+                .await?;
+        if let Some(limit) = wip_limit {
+            column = repo::set_column_wip(&state.db, &column, Some(*limit)).await?;
+        }
+        column_ids.insert(name.clone(), column.id);
+    }
+    let first_column = column_ids
+        .values()
+        .next()
+        .copied()
+        .ok_or_else(|| AppError::unprocessable("TASK_VALIDATION", "没有可用的列", vec![]))?;
+
+    let mut label_ids: std::collections::HashMap<String, Uuid> = std::collections::HashMap::new();
+    if let Some(rows) = input["labels"].as_array() {
+        for row in rows {
+            let name = row["name"].as_str().unwrap_or("标签").to_string();
+            let color = row["color"].as_str().unwrap_or("#5E6AD2");
+            let label = repo::create_label(&state.db, board.id, &name, color, state.now()).await?;
+            label_ids.insert(name, label.id);
+        }
+    }
+
+    /// 待导入的卡片。
+    struct ImportTask {
+        title: String,
+        description: String,
+        column: String,
+        labels: Vec<String>,
+        assignees: Vec<Uuid>,
+        due_at: Option<chrono::DateTime<chrono::Utc>>,
+        start_at: Option<chrono::DateTime<chrono::Utc>>,
+        estimated: Option<i32>,
+    }
+    let parse_time = |value: Option<&Value>| -> Option<chrono::DateTime<chrono::Utc>> {
+        value
+            .and_then(Value::as_str)
+            .and_then(|raw| chrono::DateTime::parse_from_rfc3339(raw).ok())
+            .map(|value| value.with_timezone(&chrono::Utc))
+    };
+    let tasks: Vec<ImportTask> = if let Some(rows) = input["tasks"].as_array() {
+        rows.iter()
+            .map(|row| ImportTask {
+                title: row["title"].as_str().unwrap_or("未命名卡片").to_string(),
+                description: row["descriptionMd"].as_str().unwrap_or("").to_string(),
+                column: row["column"].as_str().unwrap_or("").to_string(),
+                labels: row["labels"]
+                    .as_array()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|value| value.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                assignees: row["assigneeIds"]
+                    .as_array()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|value| value.as_str()?.parse::<Uuid>().ok())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                due_at: parse_time(row.get("dueAt")),
+                start_at: parse_time(row.get("startAt")),
+                estimated: row["estimatedMinutes"].as_i64().map(|value| value as i32),
+            })
+            .collect()
+    } else if let Some(rows) = input["cards"].as_array() {
+        rows.iter()
+            .map(|row| ImportTask {
+                title: row["name"].as_str().unwrap_or("未命名卡片").to_string(),
+                description: row["description"].as_str().unwrap_or("").to_string(),
+                column: row["listName"].as_str().unwrap_or("").to_string(),
+                labels: row["labelNames"]
+                    .as_array()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|value| value.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                assignees: Vec::new(),
+                due_at: parse_time(row.get("dueAt")),
+                start_at: None,
+                estimated: row["estimatedMinutes"].as_i64().map(|value| value as i32),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let mut created = 0u32;
+    for task in tasks {
+        let target = column_ids
+            .get(&task.column)
+            .copied()
+            .unwrap_or(first_column);
+        let model = repo::create_task(
+            &state.db,
+            project_id,
+            target,
+            &task.title,
+            &task.description,
+            task.assignees.first().copied(),
+            "normal",
+            task.due_at,
+            task.start_at,
+            user_id,
+            state.now(),
+        )
+        .await?;
+        if !task.assignees.is_empty() {
+            repo::set_task_assignees(&state.db, model.id, &task.assignees, state.now()).await?;
+        }
+        if let Some(minutes) = task.estimated {
+            let _ = repo::set_task_estimate(&state.db, &model, Some(minutes)).await;
+        }
+        for name in &task.labels {
+            if let Some(label_id) = label_ids.get(name) {
+                let _ = repo::attach_label(&state.db, model.id, *label_id).await;
+            }
+        }
+        created += 1;
+    }
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "boardId": board.id, "tasks": created })),
+    ))
+}
+
 /// 看板成员请求。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2767,6 +3023,8 @@ pub fn router() -> Router<SharedState> {
         .route("/boards/{id}/tasks", get(list_board_tasks))
         .route("/boards/{id}/sync", get(board_sync))
         .route("/boards/{id}/burndown", get(board_burndown))
+        .route("/boards/{id}/export", get(export_board))
+        .route("/projects/{id}/import", post(import_board))
         .route(
             "/boards/{id}/automations",
             get(list_automations).post(create_automation),
