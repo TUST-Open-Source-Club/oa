@@ -40,6 +40,15 @@ const changesOpen = ref(false)
 const changes = ref<Array<{ id: string; action: string; createdAt: string }>>([])
 const formSchema = ref<FormSchema>({ fields: [] })
 const formSaving = ref(false)
+const checklist = ref<{
+  boardId: string | null
+  projectId: string | null
+  tasks: Array<{ id: string; title: string; status: string; dueAt: string | null }>
+  progress: { total: number; done: number }
+} | null>(null)
+const checklistTemplate = ref('recruit')
+const checklistLoading = ref(false)
+const generating = ref(false)
 
 /** 报名公开链接。 */
 const shareUrl = computed(() =>
@@ -136,7 +145,54 @@ async function loadDetail() {
   ])
   registrations.value = list
   stats.value = statistic
+  await loadChecklist()
 }
+
+/** 加载筹备任务。 */
+async function loadChecklist() {
+  if (!selectedId.value) return
+  checklistLoading.value = true
+  try {
+    checklist.value = await api(`events/${selectedId.value}/tasks`)
+  } catch {
+    checklist.value = null
+  } finally {
+    checklistLoading.value = false
+  }
+}
+
+/** 生成筹备清单（幂等）。 */
+async function generateChecklist() {
+  if (!selectedId.value) return
+  generating.value = true
+  message.value = ''
+  try {
+    const result = await api<{ boardId: string; tasks: number; existed: boolean }>(
+      `events/${selectedId.value}/checklist`,
+      { method: 'POST', body: { templateKey: checklistTemplate.value } },
+    )
+    message.value = result.existed ? '筹备清单已存在' : `已生成 ${result.tasks} 张筹备卡片`
+    await loadChecklist()
+    await loadEvents()
+  } catch (error) {
+    message.value = apiErrorMessage(error, '生成筹备清单失败')
+  } finally {
+    generating.value = false
+  }
+}
+
+/** 打开筹备任务（跳到任务页对应看板/卡片）。 */
+function openChecklistTask(taskId: string) {
+  const board = checklist.value?.boardId
+  const card = taskId ? `card=${taskId}&` : ''
+  navigateTo(`/tasks?${card}${board ? `board=${board}` : ''}`)
+}
+
+/** 支持 /events?id=xxx 直达。 */
+onMounted(() => {
+  const wanted = String(useRoute().query.id ?? '')
+  if (wanted) selectedId.value = wanted
+})
 
 /** 创建活动。 */
 async function createEvent() {
@@ -325,6 +381,67 @@ onMounted(() => {
           </div>
           <p v-if="registrations.length === 0" class="py-3 text-center text-xs text-neutral-400">暂无报名</p>
         </div>
+      </Card>
+
+      <Card v-if="selected" class="space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 class="font-semibold">筹备任务</h2>
+            <p class="text-xs text-neutral-400">
+              <template v-if="checklist && checklist.progress.total">
+                完成 {{ checklist.progress.done }} / {{ checklist.progress.total }}
+              </template>
+              <template v-else>按活动开始时间倒推截止日期，生成后可在任务看板继续编辑</template>
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <select
+              v-model="checklistTemplate"
+              class="rounded-[var(--radius-field)] border border-neutral-300 px-2 py-1.5 text-[12px] dark:border-neutral-700"
+            >
+              <option value="recruit">招新</option>
+              <option value="lecture">讲座</option>
+              <option value="contest">比赛</option>
+            </select>
+            <Button
+              v-if="!checklist?.boardId"
+              size="sm"
+              :loading="generating"
+              @click="generateChecklist"
+            >
+              生成筹备清单
+            </Button>
+            <Button v-else size="sm" variant="secondary" @click="openChecklistTask('')">
+              打开任务看板
+            </Button>
+          </div>
+        </div>
+
+        <div v-if="checklist?.progress.total" class="h-1.5 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
+          <div
+            class="h-full rounded-full bg-primary-500 transition-all"
+            :style="{ width: `${Math.round((checklist.progress.done / checklist.progress.total) * 100)}%` }"
+          />
+        </div>
+
+        <div v-if="checklist?.tasks.length" class="divide-y divide-neutral-100 text-[13px]">
+          <div
+            v-for="task in checklist.tasks"
+            :key="task.id"
+            class="flex cursor-pointer items-center justify-between gap-2 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
+            @click="openChecklistTask(task.id)"
+          >
+            <span :class="task.status === 'done' ? 'text-neutral-400 line-through' : ''">
+              {{ task.title }}
+            </span>
+            <span class="shrink-0 text-xs text-neutral-400">
+              {{ task.dueAt ? new Date(task.dueAt).toLocaleDateString('zh-CN') : '无截止' }}
+            </span>
+          </div>
+        </div>
+        <p v-else-if="!checklistLoading" class="py-2 text-xs text-neutral-400">
+          还没有筹备清单
+        </p>
       </Card>
 
       <Card v-else class="text-[13px] text-neutral-400">选择或创建一个活动</Card>

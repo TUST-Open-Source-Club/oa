@@ -8,13 +8,20 @@ pub mod v1;
 /// v2：变更日志表（审计与撤销）。
 pub mod v2;
 
+/// v3：活动关联筹备项目/看板（P0 活动 × 任务连动）。
+pub mod v3;
+
 /// 迁移入口。
 pub struct Migrator;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(v1::Migration), Box::new(v2::Migration)]
+        vec![
+            Box::new(v1::Migration),
+            Box::new(v2::Migration),
+            Box::new(v3::Migration),
+        ]
     }
 }
 

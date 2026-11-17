@@ -50,6 +50,9 @@ pub mod v15;
 /// v16：看板自动化规则（P2）。
 pub mod v16;
 
+/// v17：任务关联活动（P0 活动连动）。
+pub mod v17;
+
 /// 迁移入口。
 pub struct Migrator;
 
@@ -73,6 +76,7 @@ impl MigratorTrait for Migrator {
             Box::new(v14::Migration),
             Box::new(v15::Migration),
             Box::new(v16::Migration),
+            Box::new(v17::Migration),
         ]
     }
 }

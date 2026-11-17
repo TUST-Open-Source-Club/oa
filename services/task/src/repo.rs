@@ -262,6 +262,7 @@ pub async fn create_task(
         status: Set("active".to_string()),
         completed_at: Set(None),
         estimated_minutes: Set(None),
+        event_id: Set(None),
         due_reminded_at: Set(None),
         cover_attachment_id: Set(None),
         archived_at: Set(None),
@@ -700,6 +701,7 @@ pub async fn restore_task(
         created_by: Set(fallback_created_by),
         archived_at: Set(None),
         estimated_minutes: Set(None),
+        event_id: Set(None),
         due_reminded_at: Set(None),
         cover_attachment_id: Set(None),
         status: Set(snapshot
@@ -821,6 +823,8 @@ pub struct TaskFilter {
     pub keyword: Option<String>,
     /// 截止：overdue / today / week。
     pub due: Option<String>,
+    /// 关联活动。
+    pub event_id: Option<Uuid>,
 }
 
 /// 看板下的任务（排除归档，可按负责人/标签/关键词/截止过滤）。
@@ -860,6 +864,9 @@ pub async fn list_tasks_by_board(
             .map(|row| row.task_id)
             .collect();
         select = select.filter(task::Column::Id.is_in(tagged));
+    }
+    if let Some(event_id) = filter.event_id {
+        select = select.filter(task::Column::EventId.eq(event_id));
     }
     if let Some(keyword) = filter
         .keyword
@@ -1606,4 +1613,15 @@ pub async fn create_column_with(
     .insert(db)
     .await
     .map_err(map_db_err)
+}
+
+/// 设置/解除任务关联活动。
+pub async fn set_task_event(
+    db: &DatabaseConnection,
+    model: &task::Model,
+    event_id: Option<Uuid>,
+) -> Result<task::Model, AppError> {
+    let mut active: task::ActiveModel = model.clone().into();
+    active.event_id = Set(event_id);
+    active.update(db).await.map_err(map_db_err)
 }

@@ -229,3 +229,22 @@ event 服务在状态变化时写 outbox：
 | 3 | 模板范围 | ✅ 先内置 3 套（招新/讲座/比赛），P1 再做自定义 |
 | 4 | 状态联动 | ✅ P1 做（报名截止/结束自动建卡） |
 | 5 | 报名者可见范围 | ✅ 仅活动管理员可见筹备任务 |
+
+## 实施进度（P0）
+
+已完成：
+
+- task 服务迁移 v17：`tasks.event_id` + 索引；`PATCH /tasks/{id}` 支持 `eventId`，
+  任务 DTO 带 `eventId`；`GET /boards/{id}/tasks?eventId=` 过滤；
+- event 服务迁移 v3：`events.task_project_id / task_board_id / checklist_template`；
+  `PUT /events/{id}/checklist`（活动管理员，幂等）；
+- BFF：`POST /api/event/events/{id}/checklist`（独立项目 + 看板 + 模板卡片 + 回写）、
+  `GET /api/event/events/{id}/tasks`（筹备进度）、`POST /api/event/events/{id}/tasks`；
+- 模板：`apps/web/utils/event-templates.ts`（招新/讲座/比赛，按开始时间倒推截止）；
+- 前端：活动页「筹备任务」卡片（进度、清单、生成按钮）、任务卡片活动徽章、
+  `/tasks?board=&card=` 直达、`/events?id=` 直达。
+
+测试：task `event_link_flow` 1 条、event `event_checklist_flow` 2 条、
+前端 `event-templates.spec` 5 条。
+
+P1 待做：状态联动自动建卡、模板 CRUD、活动管理员 ↔ 看板成员同步、活动列表进度汇总。

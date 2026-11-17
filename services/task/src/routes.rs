@@ -146,6 +146,8 @@ pub struct TaskDto {
     pub estimated_minutes: Option<i32>,
     /// 已登记工时（分钟）。
     pub spent_minutes: i64,
+    /// 关联活动。
+    pub event_id: Option<String>,
 }
 
 /// 前置任务摘要。
@@ -209,6 +211,7 @@ impl From<&task::Model> for TaskDto {
             blocked_by: Vec::new(),
             estimated_minutes: model.estimated_minutes,
             spent_minutes: 0,
+            event_id: model.event_id.map(|id| id.to_string()),
         }
     }
 }
@@ -1638,6 +1641,8 @@ pub struct BoardTaskQuery {
     pub q: Option<String>,
     /// 截止：overdue / today / week。
     pub due: Option<String>,
+    /// 关联活动。
+    pub event_id: Option<Uuid>,
 }
 
 /// `GET /boards/{id}/tasks`：看板任务（支持筛选）。
@@ -1655,6 +1660,7 @@ pub async fn list_board_tasks(
         label_id: query.label_id,
         keyword: query.q,
         due: query.due,
+        event_id: query.event_id,
     };
     let tasks = repo::list_tasks_by_board(&state.db, board_id, &filter, state.now()).await?;
     let mut dtos = Vec::with_capacity(tasks.len());
@@ -2004,6 +2010,9 @@ pub struct UpdateTaskRequest {
     /// 预估工时（分钟，null 清除）。
     #[serde(default, deserialize_with = "double_option")]
     pub estimated_minutes: Option<Option<i32>>,
+    /// 关联活动（null 解绑）。
+    #[serde(default, deserialize_with = "double_option")]
+    pub event_id: Option<Option<Uuid>>,
 }
 
 /// `PATCH /tasks/{id}`。
@@ -2064,6 +2073,9 @@ pub async fn update_task(
     let mut updated = updated;
     if let Some(estimated) = input.estimated_minutes {
         updated = repo::set_task_estimate(&state.db, &updated, estimated).await?;
+    }
+    if let Some(event_id) = input.event_id {
+        updated = repo::set_task_event(&state.db, &updated, event_id).await?;
     }
     if let Some(list) = replaced {
         repo::set_task_assignees(&state.db, updated.id, &list, state.now()).await?;

@@ -109,6 +109,12 @@ pub struct EventDto {
     pub reg_start_at: Option<DateTime<FixedOffset>>,
     /// 报名截止时间。
     pub reg_end_at: Option<DateTime<FixedOffset>>,
+    /// 筹备项目。
+    pub task_project_id: Option<String>,
+    /// 筹备看板。
+    pub task_board_id: Option<String>,
+    /// 清单模板 key。
+    pub checklist_template: Option<String>,
 }
 
 /// 从实体构造 DTO。
@@ -136,7 +142,47 @@ fn event_dto(model: &event::Model) -> EventDto {
         end_at: model.end_at,
         reg_start_at: model.reg_start_at,
         reg_end_at: model.reg_end_at,
+        task_project_id: model.task_project_id.map(|id| id.to_string()),
+        task_board_id: model.task_board_id.map(|id| id.to_string()),
+        checklist_template: model.checklist_template.clone(),
     }
+}
+
+/// 活动筹备清单请求。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventChecklistRequest {
+    /// 筹备项目。
+    pub project_id: Uuid,
+    /// 筹备看板。
+    pub board_id: Uuid,
+    /// 模板 key。
+    pub template_key: Option<String>,
+}
+
+/// `PUT /events/{id}/checklist`：回写筹备项目/看板（幂等）。
+pub async fn put_event_checklist(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(event_id): Path<Uuid>,
+    Json(input): Json<EventChecklistRequest>,
+) -> Result<Json<EventDto>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    let model = load_event_for_admin(&state, user_id, event_id).await?;
+    if model.task_board_id == Some(input.board_id)
+        && model.task_project_id == Some(input.project_id)
+    {
+        return Ok(Json(event_dto(&model)));
+    }
+    let updated = repo::set_event_checklist(
+        &state.db,
+        &model,
+        input.project_id,
+        input.board_id,
+        input.template_key.as_deref(),
+    )
+    .await?;
+    Ok(Json(event_dto(&updated)))
 }
 
 /// 报名 DTO。
@@ -1122,6 +1168,10 @@ pub fn router() -> Router<SharedState> {
         .route("/changes/{id}/undo", post(undo_change))
         .route("/events/{id}", get(get_event).patch(update_event))
         .route("/events/{id}/form", get(get_form).put(put_form))
+        .route(
+            "/events/{id}/checklist",
+            axum::routing::put(put_event_checklist),
+        )
         .route("/events/{id}/registrations", get(list_registrations))
         .route(
             "/events/{id}/registrations/{rid}/review",

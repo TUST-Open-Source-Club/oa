@@ -524,6 +524,7 @@ async fn claim_task_flow() {
         status: Set("active".into()),
         completed_at: Set(None),
         estimated_minutes: Set(None),
+        event_id: Set(None),
         due_reminded_at: Set(None),
         cover_attachment_id: Set(None),
         archived_at: Set(None),

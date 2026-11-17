@@ -53,6 +53,15 @@ pub mod event {
         pub email_domains: Json,
         /// draft / open / closed。
         pub status: String,
+        /// 筹备项目（外部引用）。
+        #[sea_orm(nullable)]
+        pub task_project_id: Option<Uuid>,
+        /// 筹备看板（外部引用）。
+        #[sea_orm(nullable)]
+        pub task_board_id: Option<Uuid>,
+        /// 使用的清单模板 key。
+        #[sea_orm(nullable)]
+        pub checklist_template: Option<String>,
         /// 创建者。
         pub created_by: Uuid,
         /// 创建时间。

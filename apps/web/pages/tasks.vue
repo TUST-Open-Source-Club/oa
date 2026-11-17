@@ -33,6 +33,7 @@ interface TaskItem {
   blockedBy?: Array<{ id: string; title: string; status: string }>
   estimatedMinutes?: number | null
   spentMinutes?: number
+  eventId?: string | null
 }
 interface UserItem { id: string; username: string; nickname: string; department: string | null }
 interface AttachmentItem { id: string; name: string; size: number; mime: string; createdAt: string }
@@ -59,6 +60,7 @@ const automationsOpen = ref(false)
 const automationRules = ref<Array<{ id: string; trigger: string; action: string; labelId: string | null }>>([])
 const automationDraft = reactive({ trigger: 'task.completed', action: 'add_label', labelId: '' })
 const quickAddTitle = ref('')
+const eventsById = ref<Record<string, string>>({})
 const currentCoverId = ref<string | null>(null)
 const syncCursor = ref('')
 let syncTimer: ReturnType<typeof setInterval> | undefined
@@ -961,7 +963,19 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 onMounted(async () => {
+  const wantedProject = String(route.query.project ?? '')
+  if (wantedProject) projectId.value = wantedProject
   await loadProjects()
+  const wantedBoard = String(route.query.board ?? '')
+  if (wantedBoard && boards.value.some((item) => item.id === wantedBoard)) {
+    boardId.value = wantedBoard
+    await loadBoard()
+  }
+  void api<Array<{ id: string; title: string }>>('events')
+    .then((rows) => {
+      eventsById.value = Object.fromEntries(rows.map((row) => [row.id, row.title]))
+    })
+    .catch(() => undefined)
   window.addEventListener('keydown', onKeydown)
   const cardId = String(route.query.card ?? '')
   if (cardId) {
@@ -1138,6 +1152,15 @@ onUnmounted(() => {
               class="mb-2 h-24 w-full rounded-[var(--radius-field)] object-cover"
               loading="lazy"
             />
+            <button
+              v-if="task.eventId"
+              class="mb-1.5 ml-3 inline-flex items-center gap-1 rounded bg-primary-50 px-1.5 py-0.5 text-[10px] text-primary-700 hover:bg-primary-100 dark:bg-primary-900/40 dark:text-primary-200"
+              :title="eventsById[task.eventId] ?? '关联活动'"
+              @click.stop="navigateTo(`/events?id=${task.eventId}`)"
+            >
+              <AppIcon name="calendar" class="size-3" />
+              {{ eventsById[task.eventId] ?? '活动' }}
+            </button>
             <div v-if="(task.labels ?? []).length" class="mb-1.5 flex flex-wrap gap-1 pl-3">
               <span
                 v-for="label in task.labels"

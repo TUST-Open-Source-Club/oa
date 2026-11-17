@@ -178,6 +178,9 @@ pub mod task {
         /// 预估工时（分钟）。
         #[sea_orm(nullable)]
         pub estimated_minutes: Option<i32>,
+        /// 关联活动（外部引用）。
+        #[sea_orm(nullable)]
+        pub event_id: Option<Uuid>,
         /// 到期提醒时间。
         #[sea_orm(nullable)]
         pub due_reminded_at: Option<DateTimeWithTimeZone>,

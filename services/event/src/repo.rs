@@ -64,6 +64,9 @@ pub async fn create_event(
         email_verify: Set(email_verify),
         email_domains: Set(serde_json::json!([])),
         status: Set(event::STATUS_DRAFT.to_string()),
+        task_project_id: Set(None),
+        task_board_id: Set(None),
+        checklist_template: Set(None),
         created_by: Set(created_by),
         created_at: Set(now.fixed_offset()),
         updated_at: Set(now.fixed_offset()),
@@ -471,4 +474,22 @@ pub async fn bump_code_attempts(
         .await
         .map(|_| ())
         .map_err(map_db_err)
+}
+
+/// 回写活动的筹备项目/看板（幂等）。
+pub async fn set_event_checklist(
+    db: &DatabaseConnection,
+    model: &event::Model,
+    project_id: Uuid,
+    board_id: Uuid,
+    template_key: Option<&str>,
+) -> Result<event::Model, AppError> {
+    let mut active: event::ActiveModel = model.clone().into();
+    active.task_project_id = Set(Some(project_id));
+    active.task_board_id = Set(Some(board_id));
+    if let Some(key) = template_key {
+        active.checklist_template = Set(Some(key.to_string()));
+    }
+    active.updated_at = Set(chrono::Utc::now().fixed_offset());
+    active.update(db).await.map_err(map_db_err)
 }
