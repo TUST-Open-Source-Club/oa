@@ -1833,9 +1833,10 @@ pub struct CreateTaskRequest {
     pub due_at: Option<DateTime<Utc>>,
     /// 开始时间（RFC3339）。
     pub start_at: Option<DateTime<Utc>>,
+    /// 关联活动。
+    pub event_id: Option<Uuid>,
 }
 
-/// `POST /projects/{id}/tasks`。
 /// `POST /projects/{id}/tasks`。
 pub async fn create_task(
     State(state): State<SharedState>,
@@ -1929,6 +1930,10 @@ async fn create_task_core(
         state.now(),
     )
     .await?;
+    let mut model = model;
+    if let Some(event_id) = input.event_id {
+        model = repo::set_task_event(&state.db, &model, Some(event_id)).await?;
+    }
     if !assignees.is_empty() {
         repo::set_task_assignees(&state.db, model.id, &assignees, state.now()).await?;
     }

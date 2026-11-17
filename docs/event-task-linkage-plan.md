@@ -235,7 +235,8 @@ event 服务在状态变化时写 outbox：
 已完成：
 
 - task 服务迁移 v17：`tasks.event_id` + 索引；`PATCH /tasks/{id}` 支持 `eventId`，
-  任务 DTO 带 `eventId`；`GET /boards/{id}/tasks?eventId=` 过滤；
+  **创建任务（`POST /columns/{id}/tasks`）也接受 `eventId`**；任务 DTO 带 `eventId`；
+  `GET /boards/{id}/tasks?eventId=` 过滤；
 - event 服务迁移 v3：`events.task_project_id / task_board_id / checklist_template`；
   `PUT /events/{id}/checklist`（活动管理员，幂等）；
 - BFF：`POST /api/event/events/{id}/checklist`（独立项目 + 看板 + 模板卡片 + 回写）、
@@ -248,3 +249,12 @@ event 服务在状态变化时写 outbox：
 前端 `event-templates.spec` 5 条。
 
 P1 待做：状态联动自动建卡、模板 CRUD、活动管理员 ↔ 看板成员同步、活动列表进度汇总。
+
+### 冒烟验证（本地全栈）
+
+- 创建活动「招新宣讲会」→ `POST /api/event/events/{id}/checklist {templateKey: recruit}`
+  → 新建项目 + 看板，生成 6 张卡片，`existed: false`；
+- 重复调用 → `existed: true`，不重复建卡；
+- 看板任务 6 张全部带 `eventId`；完成一张后 `GET /events/{id}/tasks` 进度变为 `1/6`；
+- 活动列表返回 `taskBoardId` / `checklistTemplate`；
+- 「讲座」模板 4 张卡片同样全带 `eventId`。

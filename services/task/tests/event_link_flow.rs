@@ -92,6 +92,19 @@ async fn link_task_to_event_and_filter() {
     let (board, column) = setup(&app, &token).await;
     let event_id = Uuid::now_v7();
 
+    // 创建时直接带活动
+    let created = request(
+        &app.app,
+        "POST",
+        &format!("/api/v1/task/columns/{column}/tasks"),
+        Some(&token),
+        Some(&json!({ "title": "创建即关联", "eventId": event_id })),
+    )
+    .await;
+    let created = created.expect(StatusCode::CREATED);
+    assert_eq!(created["eventId"], event_id.to_string());
+    let created_id = created["id"].as_str().unwrap().to_string();
+
     let linked = create_task(&app, &token, &column, "活动筹备卡片").await;
     let other = create_task(&app, &token, &column, "普通卡片").await;
 
@@ -106,6 +119,19 @@ async fn link_task_to_event_and_filter() {
     let updated: Value = updated.expect(StatusCode::OK);
     assert_eq!(updated["eventId"], event_id.to_string());
 
+    let ids = board_task_ids(&app, &token, &board, &format!("?eventId={event_id}")).await;
+    assert_eq!(ids, vec![created_id.clone(), linked.clone()]);
+
+    // 解绑创建项后只剩手动绑定那张
+    request(
+        &app.app,
+        "PATCH",
+        &format!("/api/v1/task/tasks/{created_id}"),
+        Some(&token),
+        Some(&json!({ "eventId": null })),
+    )
+    .await
+    .expect(StatusCode::OK);
     let ids = board_task_ids(&app, &token, &board, &format!("?eventId={event_id}")).await;
     assert_eq!(ids, vec![linked.clone()]);
 
