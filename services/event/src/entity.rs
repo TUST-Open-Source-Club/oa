@@ -8,8 +8,10 @@ pub mod event {
     pub const STATUS_DRAFT: &str = "draft";
     /// 开放报名。
     pub const STATUS_OPEN: &str = "open";
-    /// 已关闭。
+    /// 已关闭（报名截止）。
     pub const STATUS_CLOSED: &str = "closed";
+    /// 已结束（活动收尾）。
+    pub const STATUS_FINISHED: &str = "finished";
 
     /// 活动模型。
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]

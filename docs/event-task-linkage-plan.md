@@ -258,3 +258,14 @@ P1 待做：状态联动自动建卡、模板 CRUD、活动管理员 ↔ 看板�
 - 看板任务 6 张全部带 `eventId`；完成一张后 `GET /events/{id}/tasks` 进度变为 `1/6`；
 - 活动列表返回 `taskBoardId` / `checklistTemplate`；
 - 「讲座」模板 4 张卡片同样全带 `eventId`。
+
+### P1 进展（本轮）
+
+- **状态联动**：新增 `finished` 状态；BFF `POST /api/event/events/{id}/status`
+  切换状态后按规则补建收尾任务（closed → 审核报名名单；finished → 导出数据/整理照片/复盘），
+  已存在同名任务则跳过；前端「结束活动」按钮与列表筹备进度。
+- **成员同步**：`GET /events/{id}/admins`；生成清单时把活动管理员同步为项目成员与看板 admin
+  （尽力而为，不阻塞清单生成）。
+- **列表进度**：活动列表显示 `筹备 x/y`。
+- 规则单测：`utils/event-status-tasks.spec.ts` 3 条。
+- 模板 CRUD 仍留 P2。

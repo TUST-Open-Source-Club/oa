@@ -148,6 +148,22 @@ fn event_dto(model: &event::Model) -> EventDto {
     }
 }
 
+/// `GET /events/{id}/admins`：活动管理员（成员同步用）。
+pub async fn list_event_admins(
+    State(state): State<SharedState>,
+    auth: AuthUser,
+    Path(event_id): Path<Uuid>,
+) -> Result<Json<Value>, AppError> {
+    let user_id = user_id_of(&auth)?;
+    load_event_for_admin(&state, user_id, event_id).await?;
+    let rows = repo::list_event_admins(&state.db, event_id).await?;
+    let items: Vec<Value> = rows
+        .iter()
+        .map(|row| json!({ "userId": row.user_id, "joinedAt": row.joined_at }))
+        .collect();
+    Ok(Json(json!(items)))
+}
+
 /// 活动筹备清单请求。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -482,7 +498,7 @@ pub struct UpdateEventRequest {
     pub email_verify: Option<bool>,
     /// 域名白名单。
     pub email_domains: Option<Vec<String>>,
-    /// draft / open / closed。
+    /// draft / open / closed / finished。
     pub status: Option<String>,
 }
 
@@ -509,13 +525,17 @@ pub async fn update_event(
             event::STATUS_DRAFT,
             event::STATUS_OPEN,
             event::STATUS_CLOSED,
+            event::STATUS_FINISHED,
         ]
         .contains(&status)
         {
             return Err(AppError::unprocessable(
                 "EVENT_VALIDATION",
                 "状态不合法",
-                vec![FieldError::new("status", "仅支持 draft/open/closed")],
+                vec![FieldError::new(
+                    "status",
+                    "仅支持 draft/open/closed/finished",
+                )],
             ));
         }
     }
@@ -1172,6 +1192,7 @@ pub fn router() -> Router<SharedState> {
             "/events/{id}/checklist",
             axum::routing::put(put_event_checklist),
         )
+        .route("/events/{id}/admins", get(list_event_admins))
         .route("/events/{id}/registrations", get(list_registrations))
         .route(
             "/events/{id}/registrations/{rid}/review",

@@ -10,6 +10,8 @@ interface EventItem {
   title: string
   status: string
   capacity: number
+  taskBoardId?: string | null
+  taskProjectId?: string | null
 }
 interface RegistrationItem {
   id: string
@@ -49,6 +51,7 @@ const checklist = ref<{
 const checklistTemplate = ref('recruit')
 const checklistLoading = ref(false)
 const generating = ref(false)
+const progressById = ref<Record<string, { total: number; done: number }>>({})
 
 /** 报名公开链接。 */
 const shareUrl = computed(() =>
@@ -184,8 +187,10 @@ async function generateChecklist() {
 /** 打开筹备任务（跳到任务页对应看板/卡片）。 */
 function openChecklistTask(taskId: string) {
   const board = checklist.value?.boardId
+  const project = checklist.value?.projectId
   const card = taskId ? `card=${taskId}&` : ''
-  navigateTo(`/tasks?${card}${board ? `board=${board}` : ''}`)
+  const projectQuery = project ? `project=${project}&` : ''
+  navigateTo(`/tasks?${card}${projectQuery}${board ? `board=${board}` : ''}`)
 }
 
 /** 支持 /events?id=xxx 直达。 */
@@ -212,8 +217,25 @@ async function createEvent() {
 async function toggleStatus() {
   if (!selected.value) return
   const next = selected.value.status === 'open' ? 'closed' : 'open'
-  await api(`events/${selectedId.value}`, { method: 'PATCH', body: { status: next } })
+  const result = await api<{ added: number }>(`events/${selectedId.value}/status`, {
+    method: 'POST',
+    body: { status: next },
+  })
+  if (result.added > 0) message.value = `已自动补建 ${result.added} 张收尾任务`
   await loadEvents()
+  await loadDetail()
+}
+
+/** 结束活动（自动补建收尾任务）。 */
+async function finishEvent() {
+  if (!selectedId.value) return
+  const result = await api<{ added: number }>(`events/${selectedId.value}/status`, {
+    method: 'POST',
+    body: { status: 'finished' },
+  })
+  if (result.added > 0) message.value = `已自动补建 ${result.added} 张收尾任务`
+  await loadEvents()
+  await loadDetail()
 }
 
 /** 审核操作。 */
@@ -299,6 +321,12 @@ onMounted(() => {
           <span class="ml-1 text-xs" :class="item.status === 'open' ? 'text-success-700' : 'text-neutral-400'">
             {{ item.status === 'open' ? '开放中' : item.status === 'draft' ? '草稿' : '已关闭' }}
           </span>
+          <span
+            v-if="progressById[item.id]?.total"
+            class="ml-1 text-[11px] text-neutral-400"
+          >
+            筹备 {{ progressById[item.id]!.done }}/{{ progressById[item.id]!.total }}
+          </span>
         </button>
         <p v-if="events.length === 0" class="py-3 text-center text-xs text-neutral-400">暂无活动</p>
       </Card>
@@ -316,6 +344,9 @@ onMounted(() => {
             <Button size="sm" variant="secondary" @click="openChanges">操作记录</Button>
             <Button size="sm" variant="secondary" @click="toggleStatus">
               {{ selected.status === 'open' ? '关闭报名' : '开放报名' }}
+            </Button>
+            <Button v-if="selected.status !== 'finished'" size="sm" variant="secondary" @click="finishEvent">
+              结束活动
             </Button>
             <Button size="sm" variant="secondary" @click="exportXlsx">导出 Excel</Button>
           </div>

@@ -493,3 +493,16 @@ pub async fn set_event_checklist(
     active.updated_at = Set(chrono::Utc::now().fixed_offset());
     active.update(db).await.map_err(map_db_err)
 }
+
+/// 活动管理员列表。
+pub async fn list_event_admins(
+    db: &DatabaseConnection,
+    event_id: Uuid,
+) -> Result<Vec<event_admin::Model>, AppError> {
+    event_admin::Entity::find()
+        .filter(event_admin::Column::EventId.eq(event_id))
+        .order_by_asc(event_admin::Column::JoinedAt)
+        .all(db)
+        .await
+        .map_err(map_db_err)
+}

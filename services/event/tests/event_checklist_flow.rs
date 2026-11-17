@@ -91,3 +91,52 @@ async fn checklist_requires_event_admin() {
     .await;
     denied.expect(StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn list_event_admins_for_sync() {
+    let app = spawn().await;
+    let admin = Uuid::now_v7();
+    let token = issue_token(&app, admin);
+    let event_id = create_event(&app, &token, "admins").await;
+
+    let rows = request(
+        &app.app,
+        "GET",
+        &format!("/api/v1/event/events/{event_id}/admins"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let rows = rows.expect(StatusCode::OK);
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["userId"], admin.to_string());
+
+    // 非管理员看不到
+    let outsider = issue_token(&app, Uuid::now_v7());
+    request(
+        &app.app,
+        "GET",
+        &format!("/api/v1/event/events/{event_id}/admins"),
+        Some(&outsider),
+        None,
+    )
+    .await
+    .expect(StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn finished_status_is_allowed() {
+    let app = spawn().await;
+    let admin = Uuid::now_v7();
+    let token = issue_token(&app, admin);
+    let event_id = create_event(&app, &token, "finish-me").await;
+    let updated = request(
+        &app.app,
+        "PATCH",
+        &format!("/api/v1/event/events/{event_id}"),
+        Some(&token),
+        Some(&json!({ "status": "finished" })),
+    )
+    .await;
+    assert_eq!(updated.expect(StatusCode::OK)["status"], "finished");
+}
